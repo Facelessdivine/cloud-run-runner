@@ -1,4 +1,3 @@
-import { claimShard } from "./firestore.js";
 import { cloneRepo } from "./git.js";
 import { discoverTests } from "./manifest.js";
 import { runTests } from "./playwright.js";
@@ -8,7 +7,6 @@ const {
   TEST_REPO_URL,
   TEST_REPO_REF = "main",
   JOB_ID,
-  TOTAL_TASKS,
   REPORT_BUCKET,
 } = process.env;
 
@@ -20,14 +18,14 @@ async function main() {
   if (!REPORT_BUCKET) throw new Error("REPORT_BUCKET missing");
 
   const taskIndex = Number(process.env.CLOUD_RUN_TASK_INDEX || 0);
-  const totalTasks = Number(TOTAL_TASKS || 1);
+  const totalTasks = Number(process.env.CLOUD_RUN_TASK_COUNT || 1);
 
   await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
 
   const tests = await discoverTests();
   console.log(`📄 Discovered ${tests.length} tests`);
 
-  const shard = await claimShard(JOB_ID, tests, totalTasks);
+  const shard = sliceShard(tests, taskIndex, totalTasks);
   if (!shard.length) {
     console.log("🟡 No tests assigned — exiting");
     process.exit(0);
@@ -47,3 +45,9 @@ main().catch((err) => {
   console.error("❌ Worker failed", err);
   process.exit(1);
 });
+function sliceShard(tests, taskIndex, totalTasks) {
+  const shardSize = Math.ceil(tests.length / totalTasks);
+  const start = taskIndex * shardSize;
+  const end = Math.min(start + shardSize, tests.length);
+  return tests.slice(start, end);
+}
