@@ -41,4 +41,6 @@ if [[ "$IDX" -eq 1 ]]; then
 
   echo "🧹 Cleaning up blobs..."
   node /runner/scripts/gcs.js delete-prefix "runs/$RUN_ID/blob/"
+  echo "HTML report: https://storage.googleapis.com/$BUCKET/runs/$RUN_ID/final/html/index.html"
+  echo "JUnit report: https://storage.googleapis.com/$BUCKET/runs/$RUN_ID/final/junit.xml"
 fi
