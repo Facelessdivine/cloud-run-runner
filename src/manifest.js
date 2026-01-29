@@ -10,5 +10,20 @@ export async function discoverTests() {
 
   const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf-8"));
 
-  return manifest.tests.map((t) => t.location.file);
+  const files = new Set();
+
+  function walkSuites(suites = []) {
+    for (const suite of suites) {
+      if (suite.file) files.add(suite.file);
+      if (suite.suites) walkSuites(suite.suites);
+      if (suite.tests) {
+        for (const test of suite.tests) {
+          if (test.location?.file) files.add(test.location.file);
+        }
+      }
+    }
+  }
+
+  walkSuites(manifest.suites);
+  return [...files];
 }
