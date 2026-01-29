@@ -1,13 +1,10 @@
-FROM mcr.microsoft.com/playwright:v1.56.1-jammy
+FROM mcr.microsoft.com/playwright:v1.56.0-jammy
 
-WORKDIR /runner
+WORKDIR /app
 
-RUN apt-get update && apt-get install -y git curl jq && rm -rf /var/lib/apt/lists/*
-
-COPY package.json package-lock.json ./
+COPY package*.json ./
 RUN npm ci
 
-COPY scripts ./scripts
-RUN chmod +x scripts/*.sh
+COPY src ./src
 
-ENTRYPOINT ["bash", "/runner/scripts/entrypoint.sh"]
+ENTRYPOINT ["node", "src/index.js"]
