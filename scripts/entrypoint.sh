@@ -25,7 +25,8 @@ npm ci
 
 echo "🧠 Discovering shards..."
 export TOTAL_SHARDS=$(node /runner/scripts/shard-discovery.js)
-
+export RUN_ID="$RUN_ID"
+export BUCKET="$BUCKET"
 echo "➡️ Total shards: $TOTAL_SHARDS"
 
 echo "🧪 Running shard ${CLOUD_RUN_TASK_INDEX:-0}/${TOTAL_SHARDS}"
