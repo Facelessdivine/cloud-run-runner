@@ -10,8 +10,11 @@
   "dependencies": {
     "@google-cloud/firestore": "^7.11.0",
     "@google-cloud/storage": "^7.15.0",
+    "@types/node": "^24.10.1",
     "glob": "^10.3.10",
-    "simple-git": "^3.27.0",
-    "@types/node": "^24.10.1"
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0"
   }
 }
