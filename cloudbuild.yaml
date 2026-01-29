@@ -4,12 +4,12 @@ steps:
       [
         "build",
         "-t",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/ci/pw-runner:1.56.1",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/ci/pw-runner:1.58.0",
         ".",
       ]
 
   - name: "gcr.io/cloud-builders/docker"
-    args: ["push", "us-central1-docker.pkg.dev/$PROJECT_ID/ci/pw-runner:1.56.1"]
+    args: ["push", "us-central1-docker.pkg.dev/$PROJECT_ID/ci/pw-runner:1.58.0"]
 
 images:
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/ci/pw-runner:1.56.1"
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/ci/pw-runner:1.58.0"
