@@ -1,8 +1,15 @@
 steps:
-  - name: "gcr.io/cloud-builders/docker"
-    args: ["build", "-t", "gcr.io/$PROJECT_ID/pw-runner:1.56.1", "."]
-  - name: "gcr.io/cloud-builders/docker"
-    args: ["push", "gcr.io/$PROJECT_ID/pw-runner:1.56.1"]
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/pw/pw-runner:1.56.1
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-central1-docker.pkg.dev/$PROJECT_ID/pw/pw-runner:1.56.1
 
 images:
-  - "gcr.io/$PROJECT_ID/pw-runner:1.56.1"
+  - us-central1-docker.pkg.dev/$PROJECT_ID/pw/pw-runner:1.56.1
