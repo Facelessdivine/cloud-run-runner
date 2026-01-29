@@ -4,7 +4,8 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci
+RUN npx playwright install --with-deps
 
-COPY src ./src
+COPY . .
 
 ENTRYPOINT ["node", "src/index.js"]
