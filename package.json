@@ -11,6 +11,7 @@
     "@google-cloud/firestore": "^7.11.0",
     "@google-cloud/storage": "^7.15.0",
     "glob": "^10.3.10",
-    "simple-git": "^3.27.0"
+    "simple-git": "^3.27.0",
+    "@types/node": "^24.10.1"
   }
 }
