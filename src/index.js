@@ -4,7 +4,6 @@ import { execSync } from "node:child_process";
 
 import { cloneRepo } from "./git.js";
 import { runTests } from "./playwright.js";
-import { uploadShardReports } from "./upload.js";
 
 const storage = new Storage();
 
@@ -53,9 +52,14 @@ async function main() {
   await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
 
   const reportDir = `/tmp/blob/${RUN_ID}/shards/${taskIndex}`;
-  await runTests(reportDir, shardIndex1Based, shardCount);
+  const blobZip = await runTests(
+    reportDir,
+    shardIndex1Based,
+    shardCount,
+    taskIndex,
+  );
+  await uploadShardBlob(blobZip, REPORT_BUCKET, JOB_ID);
 
-  await uploadShardReports(reportDir, REPORT_BUCKET, RUN_ID, taskIndex);
   console.log(`✅ Shard ${shardIndex1Based}/${shardCount} upload completed`);
 
   if (taskIndex === 0) {
