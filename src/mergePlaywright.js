@@ -1,24 +1,23 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 
-export async function mergeReports(rootDir) {
-  console.log("🧬 Running playwright merge-reports");
+export function mergeReports(allBlobDir, mergedOutDir) {
+  fs.mkdirSync(mergedOutDir, { recursive: true });
 
-  const shardDirs = fs
-    .readdirSync(rootDir)
-    .map((d) => `${rootDir}/${d}`)
-    .join(" ");
+  execSync(`npx playwright merge-reports --reporter html "${allBlobDir}"`, {
+    stdio: "inherit",
+  });
 
-  const outDir = `${rootDir}/merged`;
-  fs.mkdirSync(outDir, { recursive: true });
+  const generated = path.resolve("playwright-report");
+  const targetHtml = path.join(mergedOutDir, "html-report");
 
+  fs.rmSync(targetHtml, { recursive: true, force: true });
+  fs.renameSync(generated, targetHtml);
+
+  const junitFile = path.join(mergedOutDir, "results.xml");
   execSync(
-    `npx playwright merge-reports ${shardDirs} --reporter html,junit --output=${outDir}`,
-    { stdio: "inherit" },
+    `npx playwright merge-reports --reporter junit "${allBlobDir}" > "${junitFile}"`,
+    { stdio: "inherit", shell: true },
   );
-
-  return {
-    htmlDir: `${outDir}/playwright-report`,
-    junitFile: `${outDir}/results.xml`,
-  };
 }
