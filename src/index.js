@@ -1,9 +1,9 @@
 // src/index.js
 import { Storage } from "@google-cloud/storage";
 import { execSync } from "node:child_process";
-
 import { cloneRepo } from "./git.js";
 import { runTests } from "./playwright.js";
+import { uploadShardBlob } from "./upload.js";
 
 const storage = new Storage();
 
