@@ -45,7 +45,7 @@ async function main() {
 
     await retryUntilSuccess(
       () => {
-        execSync("node merge.js", {
+        execSync("node /app/src/merge.js", {
           stdio: "inherit",
           env: { ...process.env, JOB_ID, REPORT_BUCKET },
         });
