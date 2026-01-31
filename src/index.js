@@ -68,11 +68,25 @@ async function main() {
   const shardIndex1Based = taskIndex + 1;
 
   // Base can come from JOB_ID or repo name, but RUN_ID is ALWAYS unique.
-  const baseId = (process.env.JOB_ID || repoNameFromUrl(TEST_REPO_URL)).replace(
-    /\s+/g,
-    "-",
-  );
-  const RUN_ID = `${baseId}-${runStampUtc()}-${shortRand()}`;
+  const baseId = process.env.JOB_ID || repoNameFromUrl(TEST_REPO_URL);
+
+  // ✅ Cloud Run execution name/id is shared across tasks in same run
+  const executionId =
+    process.env.CLOUD_RUN_EXECUTION ||
+    process.env.CLOUD_RUN_EXECUTION_ID ||
+    process.env.EXECUTION_ID;
+
+  const RUN_ID = process.env.RUN_ID
+    ? process.env.RUN_ID
+    : executionId
+      ? `${baseId}-${executionId}`
+      : null;
+
+  if (!RUN_ID) {
+    throw new Error(
+      "RUN_ID could not be determined. Set RUN_ID env var when executing the Cloud Run Job, or ensure the execution id env var is available.",
+    );
+  }
 
   console.log(
     `🧩 Shard: ${shardIndex1Based}/${shardCount} (taskIndex=${taskIndex})`,
