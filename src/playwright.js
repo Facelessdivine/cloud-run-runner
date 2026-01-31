@@ -5,36 +5,41 @@ import path from "node:path";
 export async function runTests(outDir, shardIndex1Based, shardCount, shardId) {
   fs.mkdirSync(outDir, { recursive: true });
 
-  // Ensure each shard generates a unique blob zip name
-  // (This env var is supported by Playwright blob reporter)
+  const blobDir = path.join(outDir, "blob-report");
+  fs.mkdirSync(blobDir, { recursive: true });
+
   const blobName = `shard-${shardId}-of-${shardCount}.zip`;
 
-  execSync(
-    `npx playwright test --shard=${shardIndex1Based}/${shardCount} --workers=1 --reporter=blob`,
-    {
-      stdio: "inherit",
-      env: { ...process.env, PWTEST_BLOB_REPORT_NAME: blobName },
-    },
+  // ✅ Create a tiny config that FORCES blob reporter output into outDir/blob-report
+  const cfgPath = path.join(outDir, "pw.blob.config.cjs");
+  fs.writeFileSync(
+    cfgPath,
+    `
+      /** @type {import('@playwright/test').PlaywrightTestConfig} */
+      module.exports = {
+        reporter: [['blob', { outputDir: ${JSON.stringify(blobDir)} }]],
+      };
+    `,
+    "utf-8",
   );
 
-  // Playwright blob reporter writes to ./blob-report by default (near package.json)
-  const blobDir = path.join(process.cwd(), "blob-report");
-  const blobPath = path.join(blobDir, blobName);
+  // ✅ Run shard with forced config
+  execSync(
+    `npx playwright test --config=${cfgPath} --shard=${shardIndex1Based}/${shardCount} --workers=1`,
+    { stdio: "inherit" },
+  );
 
-  if (!fs.existsSync(blobPath)) {
-    // fallback: if Playwright used the default report.zip name
-    const fallback = path.join(blobDir, "report.zip");
-    if (!fs.existsSync(fallback)) {
-      throw new Error(
-        `Blob report not found. Expected ${blobPath} (or ${fallback}).`,
-      );
-    }
-    fs.copyFileSync(fallback, path.join(outDir, blobName));
-    return path.join(outDir, blobName);
+  // ✅ Find the produced zip inside blobDir
+  const files = fs.readdirSync(blobDir).filter((f) => f.endsWith(".zip"));
+
+  if (files.length === 0) {
+    throw new Error(`Blob report not found. No .zip files in ${blobDir}`);
   }
 
-  // Copy blob into outDir so the uploader can grab it reliably
+  // If Playwright generates a generic name, rename it deterministically
+  const produced = path.join(blobDir, files[0]);
   const dest = path.join(outDir, blobName);
-  fs.copyFileSync(blobPath, dest);
+  fs.copyFileSync(produced, dest);
+
   return dest;
 }
