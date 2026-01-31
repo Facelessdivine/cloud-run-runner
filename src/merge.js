@@ -1,6 +1,6 @@
 import { cleanupBlobs } from "./cleanup.js";
 import { downloadDir, uploadDir } from "./gcs.js";
-import { mergeReports } from "./mergePlaywright.js";
+import { mergePlaywrightReports } from "./mergePlaywright.js";
 
 const { JOB_ID, REPORT_BUCKET } = process.env;
 
@@ -15,7 +15,10 @@ async function main() {
 
   await downloadDir(REPORT_BUCKET, shardsPrefix, workDir);
 
-  const { htmlDir, junitFile } = await mergeReports(workDir);
+  const { htmlDir, junitFile } = mergePlaywrightReports({
+    allBlobDir: workDir,
+    mergedDir: workDir,
+  });
 
   await uploadDir(REPORT_BUCKET, htmlDir, `${JOB_ID}/final/html`);
   await uploadDir(REPORT_BUCKET, junitFile, `${JOB_ID}/final/junit.xml`);
