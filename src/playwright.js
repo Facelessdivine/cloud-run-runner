@@ -15,11 +15,12 @@ export async function runTests(outDir, shardIndex1Based, shardCount, shardId) {
   fs.writeFileSync(
     cfgPath,
     `
-      /** @type {import('@playwright/test').PlaywrightTestConfig} */
-      module.exports = {
-        reporter: [['blob', { outputDir: ${JSON.stringify(blobDir)} }]],
-      };
-    `,
+    /** @type {import('@playwright/test').PlaywrightTestConfig} */
+    module.exports = {
+      testDir: ".",
+      reporter: [['blob', { outputDir: ${JSON.stringify(blobDir)} }]],
+    };
+  `,
     "utf-8",
   );
 
