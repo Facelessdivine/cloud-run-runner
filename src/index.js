@@ -1,3 +1,4 @@
+// src/index.js
 import { Storage } from "@google-cloud/storage";
 import { execSync } from "node:child_process";
 
@@ -7,19 +8,36 @@ import { uploadShardReports } from "./upload.js";
 
 const storage = new Storage();
 
-const {
-  TEST_REPO_URL,
-  TEST_REPO_REF = "main",
-  JOB_ID,
-  REPORT_BUCKET,
-} = process.env;
+const { TEST_REPO_URL, TEST_REPO_REF = "main", REPORT_BUCKET } = process.env;
+
+function repoNameFromUrl(url) {
+  const clean = url.replace(/\/+$/, "");
+  const last = clean.split("/").pop() || "repo";
+  return last.replace(/\.git$/i, "");
+}
+
+function runStampUtc() {
+  // Example: 20260131T235959Z
+  return new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+}
+
+function shortRand() {
+  return Math.random().toString(36).slice(2, 8);
+}
 
 async function main() {
   console.log("🚀 Worker starting");
 
   if (!TEST_REPO_URL) throw new Error("TEST_REPO_URL missing");
-  if (!JOB_ID) throw new Error("JOB_ID missing");
   if (!REPORT_BUCKET) throw new Error("REPORT_BUCKET missing");
+
+  // ✅ RUN_ID is unique by default; can still be overridden by env JOB_ID
+  const RUN_ID =
+    process.env.JOB_ID ||
+    `${repoNameFromUrl(TEST_REPO_URL)}-${runStampUtc()}-${shortRand()}`;
 
   const taskIndex = Number(process.env.CLOUD_RUN_TASK_INDEX || 0); // 0-based
   const shardCount = Number(process.env.CLOUD_RUN_TASK_COUNT || 1);
@@ -28,16 +46,16 @@ async function main() {
   console.log(
     `🧩 Shard: ${shardIndex1Based}/${shardCount} (taskIndex=${taskIndex})`,
   );
-  console.log(`🆔 JOB_ID=${JOB_ID}`);
+  console.log(`🆔 RUN_ID=${RUN_ID}`);
   console.log(`🪣 REPORT_BUCKET=${REPORT_BUCKET}`);
   console.log(`🌿 TEST_REPO_REF=${TEST_REPO_REF}`);
 
   await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
 
-  const reportDir = `/tmp/blob/${JOB_ID}/shards/${taskIndex}`;
+  const reportDir = `/tmp/blob/${RUN_ID}/shards/${taskIndex}`;
   await runTests(reportDir, shardIndex1Based, shardCount);
 
-  await uploadShardReports(reportDir, REPORT_BUCKET, JOB_ID, taskIndex);
+  await uploadShardReports(reportDir, REPORT_BUCKET, RUN_ID, taskIndex);
   console.log(`✅ Shard ${shardIndex1Based}/${shardCount} upload completed`);
 
   if (taskIndex === 0) {
@@ -47,23 +65,20 @@ async function main() {
       () => {
         execSync("node /app/src/merge.js", {
           stdio: "inherit",
-          env: { ...process.env, JOB_ID, REPORT_BUCKET },
+          env: { ...process.env, JOB_ID: RUN_ID, REPORT_BUCKET },
         });
       },
-      {
-        timeoutMs: 30 * 60 * 1000,
-        intervalMs: 10 * 1000,
-      },
+      { timeoutMs: 30 * 60 * 1000, intervalMs: 10 * 1000 },
     );
 
-    const indexObject = `${JOB_ID}/final/html/index.html`;
+    const indexObject = `${RUN_ID}/final/html/index.html`;
     console.log("====================================================");
     console.log("✅ MERGE COMPLETED");
     console.log(`📍 HTML: gs://${REPORT_BUCKET}/${indexObject}`);
     console.log("====================================================");
 
     console.log("🧹 Cleanup: deleting shard blobs...");
-    await deletePrefix(REPORT_BUCKET, `${JOB_ID}/shards/`);
+    await deletePrefix(REPORT_BUCKET, `${RUN_ID}/shards/`);
     console.log("✅ Cleanup done");
   } else {
     console.log(`ℹ️ Non-coordinator shard done (taskIndex=${taskIndex})`);
