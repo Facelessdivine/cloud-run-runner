@@ -1,8 +1,15 @@
+// src/playwright.js
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-export async function runTests(outDir, shardIndex1Based, shardCount, shardId) {
+export async function runTests(
+  outDir,
+  shardIndex1Based,
+  shardCount,
+  shardId,
+  repoDir,
+) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const blobDir = path.join(outDir, "blob-report");
@@ -10,37 +17,39 @@ export async function runTests(outDir, shardIndex1Based, shardCount, shardId) {
 
   const blobName = `shard-${shardId}-of-${shardCount}.zip`;
 
-  // ✅ Create a tiny config that FORCES blob reporter output into outDir/blob-report
   const cfgPath = path.join(outDir, "pw.blob.config.cjs");
   fs.writeFileSync(
     cfgPath,
     `
-    /** @type {import('@playwright/test').PlaywrightTestConfig} */
-    module.exports = {
-      testDir: ".",
-      reporter: [['blob', { outputDir: ${JSON.stringify(blobDir)} }]],
-    };
-  `,
+      /** @type {import('@playwright/test').PlaywrightTestConfig} */
+      module.exports = {
+        // ✅ Force a consistent testDir for ALL shards
+        testDir: ${JSON.stringify(path.join(repoDir, "tests"))},
+        reporter: [['blob', { outputDir: ${JSON.stringify(blobDir)} }]],
+      };
+    `,
     "utf-8",
   );
 
-  // ✅ Run shard with forced config
+  console.log(`▶️ Running shard ${shardId}: ${shardIndex1Based}/${shardCount}`);
+  console.log(`   repoDir=${repoDir}`);
+  console.log(`   testDir=${path.join(repoDir, "tests")}`);
+  console.log(`   blobDir=${blobDir}`);
+
   execSync(
     `npx playwright test --config=${cfgPath} --shard=${shardIndex1Based}/${shardCount} --workers=1`,
-    { stdio: "inherit" },
+    { stdio: "inherit", cwd: repoDir }, // ✅ run from repoDir
   );
 
-  // ✅ Find the produced zip inside blobDir
   const files = fs.readdirSync(blobDir).filter((f) => f.endsWith(".zip"));
-
   if (files.length === 0) {
     throw new Error(`Blob report not found. No .zip files in ${blobDir}`);
   }
 
-  // If Playwright generates a generic name, rename it deterministically
   const produced = path.join(blobDir, files[0]);
   const dest = path.join(outDir, blobName);
   fs.copyFileSync(produced, dest);
 
+  console.log(`✅ Shard ${shardId} produced blob: ${dest}`);
   return dest;
 }

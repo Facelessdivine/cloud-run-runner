@@ -95,7 +95,7 @@ async function main() {
   console.log(`🪣 REPORT_BUCKET=${REPORT_BUCKET}`);
   console.log(`🌿 TEST_REPO_REF=${TEST_REPO_REF}`);
 
-  await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
+  const repoDir = await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
 
   const reportDir = `/tmp/blob/${RUN_ID}/shards/${taskIndex}`;
   const blobZip = await runTests(
@@ -103,6 +103,7 @@ async function main() {
     shardIndex1Based,
     shardCount,
     taskIndex,
+    repoDir,
   );
 
   await uploadShardBlob(blobZip, REPORT_BUCKET, RUN_ID);

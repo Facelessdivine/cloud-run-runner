@@ -1,14 +1,24 @@
+// src/git.js
 import fs from "node:fs";
 import simpleGit from "simple-git";
 
 export async function cloneRepo(url, ref) {
-  if (fs.existsSync("tests")) {
+  const repoDir = "/app/tests"; // or "/workspace/repo" — pick ONE stable path
+
+  if (fs.existsSync(repoDir)) {
     console.log("🧹 Removing existing tests folder");
-    fs.rmSync("tests", { recursive: true, force: true });
+    fs.rmSync(repoDir, { recursive: true, force: true });
   }
 
   console.log(`📥 Cloning ${url} (${ref})`);
-  await simpleGit().clone(url, "tests");
-  process.chdir("tests");
-  await simpleGit().checkout(ref);
+  const git = simpleGit();
+  await git.clone(url, repoDir);
+  const repoGit = simpleGit(repoDir);
+  await repoGit.checkout(ref);
+
+  // ✅ Ensure everything else runs from the same working dir in every task
+  process.chdir(repoDir);
+  console.log(`📁 Repo ready at ${repoDir}`);
+
+  return repoDir;
 }
