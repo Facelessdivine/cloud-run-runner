@@ -16,7 +16,6 @@ function repoNameFromUrl(url) {
 }
 
 function runStampUtc() {
-  // Example: 20260131T235959Z
   return new Date()
     .toISOString()
     .replace(/[-:]/g, "")
@@ -34,8 +33,11 @@ async function main() {
   if (!REPORT_BUCKET) throw new Error("REPORT_BUCKET missing");
 
   // ✅ RUN_ID is unique by default; can still be overridden by env JOB_ID
-  const RUN_ID =
+  const JOB_ID =
     process.env.JOB_ID ||
+    `${repoNameFromUrl(TEST_REPO_URL)}-${runStampUtc()}-${shortRand()}`;
+  const RUN_ID =
+    JOB_ID ||
     `${repoNameFromUrl(TEST_REPO_URL)}-${runStampUtc()}-${shortRand()}`;
 
   const taskIndex = Number(process.env.CLOUD_RUN_TASK_INDEX || 0); // 0-based
