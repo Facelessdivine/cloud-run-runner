@@ -21,8 +21,7 @@ async function main() {
   if (!JOB_ID) throw new Error("JOB_ID missing");
   if (!REPORT_BUCKET) throw new Error("REPORT_BUCKET missing");
 
-  // Cloud Run Jobs (0-based index, total count)
-  const taskIndex = Number(process.env.CLOUD_RUN_TASK_INDEX || 0);
+  const taskIndex = Number(process.env.CLOUD_RUN_TASK_INDEX || 0); // 0-based
   const shardCount = Number(process.env.CLOUD_RUN_TASK_COUNT || 1);
   const shardIndex1Based = taskIndex + 1;
 
@@ -31,104 +30,96 @@ async function main() {
   );
   console.log(`🆔 JOB_ID=${JOB_ID}`);
   console.log(`🪣 REPORT_BUCKET=${REPORT_BUCKET}`);
+  console.log(`🌿 TEST_REPO_REF=${TEST_REPO_REF}`);
 
-  // 1) Clone the test repo
   await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
 
-  // 2) Run this shard (Playwright native sharding splits test cases correctly)
   const reportDir = `/tmp/blob/${JOB_ID}/shards/${taskIndex}`;
   await runTests(reportDir, shardIndex1Based, shardCount);
 
-  // 3) Upload shard artifacts to GCS
   await uploadShardReports(reportDir, REPORT_BUCKET, JOB_ID, taskIndex);
+  console.log(`✅ Shard ${shardIndex1Based}/${shardCount} upload completed`);
 
-  console.log(`✅ Shard ${shardIndex1Based}/${shardCount} uploaded`);
-
-  // 4) Coordinator: wait for all shards, then run merge.js
   if (taskIndex === 0) {
-    console.log(
-      `👑 Coordinator task detected (taskIndex=0). Waiting for ${shardCount} shards...`,
+    console.log("👑 Coordinator: will run merge.js (retry until success)");
+
+    await retryUntilSuccess(
+      () => {
+        execSync("node src/merge.js", {
+          stdio: "inherit",
+          env: { ...process.env, JOB_ID, REPORT_BUCKET },
+        });
+      },
+      {
+        timeoutMs: 30 * 60 * 1000,
+        intervalMs: 10 * 1000,
+      },
     );
 
-    // Wait until all shard folders appear in GCS under JOB_ID/shards/
-    await waitForAllShards({
-      bucketName: REPORT_BUCKET,
-      jobId: JOB_ID,
-      expectedShards: shardCount,
-      timeoutMs: 30 * 60 * 1000, // 30 minutes
-      pollEveryMs: 10 * 1000, // 10 seconds
-    });
+    const indexObject = `${JOB_ID}/final/html/index.html`;
+    console.log("====================================================");
+    console.log("✅ MERGE COMPLETED");
+    console.log(`📍 HTML: gs://${REPORT_BUCKET}/${indexObject}`);
+    console.log("====================================================");
 
-    console.log("🧩 All shards found. Executing merge.js...");
-
-    // IMPORTANT: merge.js must use JOB_ID + REPORT_BUCKET to download/merge/upload finals.
-    // We run it in the same container.
-    execSync("node src/merge.js", {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        JOB_ID,
-        REPORT_BUCKET,
-      },
-    });
-
-    console.log("🏁 Coordinator finished merge.js");
+    console.log("🧹 Cleanup: deleting shard blobs...");
+    await deletePrefix(REPORT_BUCKET, `${JOB_ID}/shards/`);
+    console.log("✅ Cleanup done");
   } else {
-    console.log(`ℹ️ Non-coordinator shard done (taskIndex=${taskIndex}).`);
+    console.log(`ℹ️ Non-coordinator shard done (taskIndex=${taskIndex})`);
   }
 
   console.log("✅ Worker done");
 }
 
-/**
- * Checks GCS for shard folders under:
- *   gs://<bucket>/<jobId>/shards/<shardId>/*
- *
- * We detect shardId by parsing file object paths.
- */
-async function waitForAllShards({
-  bucketName,
-  jobId,
-  expectedShards,
-  timeoutMs,
-  pollEveryMs,
-}) {
-  const bucket = storage.bucket(bucketName);
-  const prefix = `${jobId}/shards/`;
-
+async function retryUntilSuccess(fn, { timeoutMs, intervalMs }) {
   const started = Date.now();
+  let attempt = 0;
+
   while (true) {
-    const shardIds = await getShardIds(bucket, prefix);
+    attempt += 1;
+    try {
+      console.log(`🔁 Merge attempt #${attempt}`);
+      fn();
+      return;
+    } catch (err) {
+      const elapsed = Date.now() - started;
 
-    console.log(
-      `🔎 Found ${shardIds.size}/${expectedShards} shard folders: ${[...shardIds].sort().join(", ") || "(none)"}`,
-    );
-
-    if (shardIds.size >= expectedShards) return;
-
-    if (Date.now() - started > timeoutMs) {
-      throw new Error(
-        `Timeout waiting for shards. Found ${shardIds.size}/${expectedShards} under gs://${bucketName}/${prefix}`,
+      console.log(
+        "⏳ merge.js not ready yet (likely missing shard blobs). Retrying...",
       );
-    }
+      console.log(
+        `   elapsed=${Math.round(elapsed / 1000)}s, next retry in ${Math.round(intervalMs / 1000)}s`,
+      );
 
-    await sleep(pollEveryMs);
+      if (elapsed > timeoutMs) {
+        console.error("❌ Timeout waiting for merge to succeed");
+        throw err;
+      }
+
+      await sleep(intervalMs);
+    }
   }
 }
 
-async function getShardIds(bucket, prefix) {
-  // Get a snapshot of objects under the shards prefix
+async function deletePrefix(bucketName, prefix) {
+  const bucket = storage.bucket(bucketName);
   const [files] = await bucket.getFiles({ prefix });
 
-  const shardIds = new Set();
-  for (const f of files) {
-    // f.name like: "<jobId>/shards/<shardId>/whatever"
-    const rest = f.name.slice(prefix.length); // "<shardId>/whatever"
-    const shardId = rest.split("/")[0];
-    if (shardId) shardIds.add(shardId);
+  const deletions = files.filter((f) => !f.name.endsWith("/"));
+  if (!deletions.length) {
+    console.log(`ℹ️ Nothing to delete under gs://${bucketName}/${prefix}`);
+    return;
   }
 
-  return shardIds;
+  const batchSize = 200;
+  for (let i = 0; i < deletions.length; i += batchSize) {
+    const batch = deletions.slice(i, i + batchSize);
+    await Promise.allSettled(batch.map((f) => f.delete()));
+    console.log(
+      `🗑️ Deleted ${Math.min(i + batchSize, deletions.length)}/${deletions.length}`,
+    );
+  }
 }
 
 function sleep(ms) {
