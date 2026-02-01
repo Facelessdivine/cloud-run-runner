@@ -94,10 +94,22 @@ async function main() {
   console.log(`🆔 RUN_ID=${RUN_ID}`);
   console.log(`🪣 REPORT_BUCKET=${REPORT_BUCKET}`);
   console.log(`🌿 TEST_REPO_REF=${TEST_REPO_REF}`);
+  console.log("🧠 Task identity:", {
+    CLOUD_RUN_TASK_INDEX: process.env.CLOUD_RUN_TASK_INDEX,
+    CLOUD_RUN_TASK_COUNT: process.env.CLOUD_RUN_TASK_COUNT,
+    HOSTNAME: process.env.HOSTNAME,
+  });
 
   const repoDir = await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
 
-  const reportDir = `/tmp/blob/${RUN_ID}/shards/${taskIndex}`;
+  const reportDir = path.join(
+    os.tmpdir(),
+    "blob",
+    RUN_ID,
+    "shards",
+    String(taskIndex),
+  );
+
   const blobZip = await runTests(
     reportDir,
     shardIndex1Based,

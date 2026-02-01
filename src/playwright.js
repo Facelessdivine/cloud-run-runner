@@ -4,28 +4,31 @@ import fs from "node:fs";
 import path from "node:path";
 
 export async function runTests(
-  outDir,
+  reportDir,
   shardIndex1Based,
   shardCount,
   shardId,
   repoDir,
 ) {
-  fs.mkdirSync(outDir, { recursive: true });
+  fs.mkdirSync(reportDir, { recursive: true });
 
-  const blobDir = path.join(outDir, "blob-report");
+  const blobDir = path.join(reportDir, "blob-report");
   fs.mkdirSync(blobDir, { recursive: true });
 
-  const blobName = `shard-${shardId}-of-${shardCount}.zip`;
+  const cfgPath = path.join(reportDir, "pw.blob.config.cjs");
 
-  const cfgPath = path.join(outDir, "pw.blob.config.cjs");
   fs.writeFileSync(
     cfgPath,
     `
       /** @type {import('@playwright/test').PlaywrightTestConfig} */
       module.exports = {
-        // ✅ Force a consistent testDir for ALL shards
         testDir: ${JSON.stringify(path.join(repoDir, "tests"))},
-        reporter: [['blob', { outputDir: ${JSON.stringify(blobDir)} }]],
+        fullyParallel: true,
+        workers: 1,
+        reporter: [
+          ['line'],
+          ['blob', { outputDir: ${JSON.stringify(blobDir)} }],
+        ],
       };
     `,
     "utf-8",
@@ -37,19 +40,16 @@ export async function runTests(
   console.log(`   blobDir=${blobDir}`);
 
   execSync(
-    `npx playwright test --config=${cfgPath} --shard=${shardIndex1Based}/${shardCount} --workers=1`,
-    { stdio: "inherit", cwd: repoDir }, // ✅ run from repoDir
+    `npx playwright test --config=${cfgPath} --shard=${shardIndex1Based}/${shardCount}`,
+    { stdio: "inherit", cwd: repoDir },
   );
 
-  const files = fs.readdirSync(blobDir).filter((f) => f.endsWith(".zip"));
-  if (files.length === 0) {
-    throw new Error(`Blob report not found. No .zip files in ${blobDir}`);
+  // ✅ Blob reporter might not produce a .zip; it always produces files in blobDir.
+  const blobFiles = fs.existsSync(blobDir) ? fs.readdirSync(blobDir) : [];
+  if (blobFiles.length === 0) {
+    throw new Error(`Blob report directory is empty: ${blobDir}`);
   }
 
-  const produced = path.join(blobDir, files[0]);
-  const dest = path.join(outDir, blobName);
-  fs.copyFileSync(produced, dest);
-
-  console.log(`✅ Shard ${shardId} produced blob: ${dest}`);
-  return dest;
+  console.log(`✅ Shard ${shardId} produced blob files: ${blobFiles.length}`);
+  return blobDir; // return directory path
 }
