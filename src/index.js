@@ -119,7 +119,8 @@ async function main() {
     repoDir,
   );
 
-  await uploadShardBlob(blobZip, REPORT_BUCKET, RUN_ID);
+  await uploadShardBlob(blobZip, REPORT_BUCKET, RUN_ID, taskIndex);
+
   console.log(`✅ Shard ${shardIndex1Based}/${shardCount} upload completed`);
 
   if (taskIndex === 0) {
