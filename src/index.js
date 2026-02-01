@@ -1,10 +1,10 @@
 // src/index.js
 import { Storage } from "@google-cloud/storage";
 import { execSync } from "node:child_process";
+import path from "node:path";
 import { cloneRepo } from "./git.js";
 import { runTests } from "./playwright.js";
 import { uploadShardBlob } from "./upload.js";
-
 const storage = new Storage();
 const { TEST_REPO_URL, TEST_REPO_REF = "main", REPORT_BUCKET } = process.env;
 
