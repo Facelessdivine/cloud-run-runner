@@ -1,40 +1,135 @@
+// src/merge.js
 import { Storage } from "@google-cloud/storage";
-import { cleanupBlobs } from "./cleanup.js";
-import { downloadDir, uploadDir } from "./gcs.js";
-import { mergePlaywrightReports } from "./mergePlaywright.js";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const storage = new Storage();
-const { JOB_ID, REPORT_BUCKET } = process.env;
+
+function elog(...args) {
+  console.error(...args);
+}
+
+async function downloadPrefix(bucketName, prefix, localDir) {
+  const bucket = storage.bucket(bucketName);
+  fs.mkdirSync(localDir, { recursive: true });
+
+  const [files] = await bucket.getFiles({ prefix });
+  if (!files.length) {
+    throw new Error(`No files found in gs://${bucketName}/${prefix}`);
+  }
+
+  for (const f of files) {
+    // Keep relative structure under prefix
+    const rel = f.name.slice(prefix.length);
+    if (!rel) continue;
+
+    const destPath = path.join(localDir, rel);
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    await f.download({ destination: destPath });
+  }
+}
+
+async function uploadDir(bucketName, localDir, destPrefix) {
+  const bucket = storage.bucket(bucketName);
+
+  const walk = (dir) => {
+    const out = [];
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name);
+      const st = fs.statSync(p);
+      if (st.isDirectory()) out.push(...walk(p));
+      else out.push(p);
+    }
+    return out;
+  };
+
+  const files = walk(localDir);
+  if (!files.length) throw new Error(`Nothing to upload from ${localDir}`);
+
+  for (const filePath of files) {
+    const rel = path.relative(localDir, filePath).replace(/\\/g, "/");
+    const dest = `${destPrefix}${rel}`;
+    await bucket.upload(filePath, { destination: dest });
+  }
+}
 
 async function main() {
-  if (!JOB_ID) throw new Error("JOB_ID missing");
-  if (!REPORT_BUCKET) throw new Error("REPORT_BUCKET missing");
+  const bucketName = process.env.REPORT_BUCKET;
+  const runId = process.env.JOB_ID || process.env.RUN_ID;
 
-  console.log("🧩 Merging reports");
+  if (!bucketName) throw new Error("REPORT_BUCKET missing");
+  if (!runId) throw new Error("JOB_ID (RUN_ID) missing for merge");
 
-  const workDir = `/tmp/${JOB_ID}`;
-  const blobsPrefix = `${JOB_ID}/blobs`;
-  const localBlobsDir = `${workDir}/blobs`;
+  const workDir = path.join(os.tmpdir(), runId);
+  const blobsPrefix = `${runId}/blobs/`;
+  const localBlobsDir = path.join(workDir, "blobs");
 
-  // Download flat blob zips into /tmp/<JOB_ID>/blobs
-  await downloadDir(REPORT_BUCKET, blobsPrefix, localBlobsDir);
+  elog(`🧩 Merge start`);
+  elog(`🪣 bucket=${bucketName}`);
+  elog(`🆔 runId=${runId}`);
+  elog(
+    `📥 Downloading blobs: gs://${bucketName}/${blobsPrefix} → ${localBlobsDir}`,
+  );
 
-  const { htmlDir, junitPath } = mergePlaywrightReports({
-    allBlobDir: localBlobsDir,
-    mergedDir: workDir,
+  // Fresh workspace
+  fs.rmSync(workDir, { recursive: true, force: true });
+  fs.mkdirSync(workDir, { recursive: true });
+
+  await downloadPrefix(bucketName, blobsPrefix, localBlobsDir);
+
+  // Confirm we have shard zips
+  const blobFiles = fs.readdirSync(localBlobsDir);
+  elog(`📂 Local blobs entries (${blobFiles.length}): ${blobFiles.join(", ")}`);
+
+  // Merge output directory
+  const mergedHtmlDir = path.join(workDir, "final-html");
+  fs.mkdirSync(mergedHtmlDir, { recursive: true });
+
+  // IMPORTANT: Use the same Playwright version already installed in the image.
+  // This should work if your runner has playwright in dependencies.
+  const mergeCmd = `npx playwright merge-reports --reporter html "${localBlobsDir}"`;
+  elog(`🖥️ Running: ${mergeCmd}`);
+
+  execSync(mergeCmd, {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      // Force output to default playwright folder "playwright-report"
+      // We'll move it to mergedHtmlDir afterwards.
+      CI: "1",
+    },
   });
 
-  await uploadDir(REPORT_BUCKET, htmlDir, `${JOB_ID}/final/html`);
+  // Playwright writes to ./playwright-report by default
+  const defaultReportDir = path.join(process.cwd(), "playwright-report");
+  if (!fs.existsSync(defaultReportDir)) {
+    throw new Error(
+      `Expected merged html folder not found: ${defaultReportDir}`,
+    );
+  }
 
-  // Upload JUnit as a file (not a directory)
-  await storage.bucket(REPORT_BUCKET).upload(junitPath, {
-    destination: `${JOB_ID}/final/junit.xml`,
-  });
+  // Move report into our work dir
+  fs.rmSync(mergedHtmlDir, { recursive: true, force: true });
+  fs.renameSync(defaultReportDir, mergedHtmlDir);
 
-  // Optional: cleanup blobs after successful merge
-  await cleanupBlobs(REPORT_BUCKET, blobsPrefix);
+  const indexPath = path.join(mergedHtmlDir, "index.html");
+  if (!fs.existsSync(indexPath)) {
+    throw new Error(`Merged HTML index not found at ${indexPath}`);
+  }
 
-  console.log("✅ Merge + cleanup done");
+  const destPrefix = `${runId}/final/html/`;
+  elog(
+    `📤 Uploading merged html: ${mergedHtmlDir} → gs://${bucketName}/${destPrefix}`,
+  );
+
+  await uploadDir(bucketName, mergedHtmlDir, destPrefix);
+
+  elog("====================================================");
+  elog("✅ MERGE COMPLETED");
+  elog(`📍 HTML: gs://${bucketName}/${runId}/final/html/index.html`);
+  elog("====================================================");
 }
 
 main().catch((err) => {
