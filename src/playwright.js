@@ -1,5 +1,5 @@
 // src/playwright.js
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -22,10 +22,13 @@ function listDirDetailed(dir) {
 }
 
 /**
- * Force a stable Playwright config for sharding + blob merge.
- * We do NOT load the repo config to avoid reporter override / TS/ESM issues.
+ * Force stable config for sharding + blob merge.
+ * - Does NOT fail worker on test failures (non-zero exit).
+ * - Retries failed tests 2 times.
+ * - Produces blob report regardless of failures.
  *
- * Returns: blob zip path OR blobDir (directory).
+ * Returns: { blob: string, exitCode: number }
+ *   blob is a zip path OR blobDir.
  */
 export async function runTests(
   reportDir,
@@ -42,10 +45,8 @@ export async function runTests(
   const artifactsDir = path.join(reportDir, "artifacts");
   fs.mkdirSync(artifactsDir, { recursive: true });
 
-  // IMPORTANT: stable testDir across shards for merge stability
   const testDir = path.join(repoDir, "tests");
 
-  // Force config file
   const cfgPath = path.join(reportDir, "pw.forced.config.cjs");
   fs.writeFileSync(
     cfgPath,
@@ -54,13 +55,13 @@ export async function runTests(
 module.exports = {
   testDir: ${JSON.stringify(testDir)},
 
-  // shard at test-case level even if all tests are in one spec
   fullyParallel: true,
-
-  // one worker per shard process
   workers: 1,
 
-  // artifacts on failure (your requirement)
+  // ✅ retry failed tests twice
+  retries: 2,
+
+  // ✅ artifacts on failure
   use: {
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
@@ -68,7 +69,7 @@ module.exports = {
     outputDir: ${JSON.stringify(artifactsDir)},
   },
 
-  // REQUIRED for merge
+  // ✅ required for merge
   reporter: [
     ['line'],
     ['blob', { outputDir: ${JSON.stringify(blobDir)} }],
@@ -86,28 +87,50 @@ module.exports = {
   elog(`artifactsDir=${artifactsDir}`);
   elog(`cfgPath=${cfgPath}`);
 
-  // Force config usage explicitly
-  const cmd = `npx playwright test --config="${cfgPath}" --shard=${shardIndex1Based}/${shardCount}`;
+  const args = [
+    "playwright",
+    "test",
+    `--config=${cfgPath}`,
+    `--shard=${shardIndex1Based}/${shardCount}`,
+  ];
 
-  try {
-    execSync(cmd, {
-      stdio: "inherit",
-      cwd: repoDir,
-      env: { ...process.env, CI: "1", PW_TEST_NO_COLOR: "1" },
-    });
-  } catch (e) {
-    elog("❌ Playwright command failed:", cmd);
-    if (e?.stdout) elog("---- stdout ----\n" + e.stdout.toString());
-    if (e?.stderr) elog("---- stderr ----\n" + e.stderr.toString());
-    throw e;
+  // Use npx so it picks the installed Playwright in the cloned repo
+  const result = spawnSync("npx", args, {
+    cwd: repoDir,
+    env: { ...process.env, CI: "1", PW_TEST_NO_COLOR: "1" },
+    stdio: "inherit",
+  });
+
+  // spawnSync returns null code if terminated by signal
+  const exitCode = typeof result.status === "number" ? result.status : 1;
+
+  if (result.error) {
+    // This is a REAL infra error (can't spawn process)
+    elog("❌ Failed to start Playwright process:", result.error);
+    throw result.error;
   }
 
-  elog("✅ Playwright finished; inspecting blob output...");
+  if (result.signal) {
+    // Also infra-level (killed)
+    throw new Error(`Playwright terminated by signal: ${result.signal}`);
+  }
+
+  // ✅ IMPORTANT: non-zero exitCode can be just test failures.
+  // We DO NOT throw here. We still generate/upload blob and let merge happen.
+  if (exitCode !== 0) {
+    elog(
+      `⚠️ Playwright shard exitCode=${exitCode} (likely test failures). Continuing to upload blob...`,
+    );
+  } else {
+    elog(`✅ Playwright shard exitCode=0`);
+  }
+
+  // Blob must exist to merge; if missing, that's infra/config issue.
+  elog("✅ Inspecting blob output...");
   const detailed = listDirDetailed(blobDir);
   elog(`📂 blobDir entries (${detailed.length}):`, detailed);
 
   if (detailed.length === 0) {
-    // Extra debugging to see where Playwright wrote output
     const reportDirEntries = listDirDetailed(reportDir);
     elog(
       `🧩 reportDir entries (${reportDirEntries.length}):`,
@@ -117,14 +140,10 @@ module.exports = {
   }
 
   const zipEntry = detailed.find((e) => e.isFile && e.name.endsWith(".zip"));
-  if (zipEntry) {
-    const zipPath = path.join(blobDir, zipEntry.name);
-    elog(`✅ Shard ${shardId} produced blob zip: ${zipPath}`);
-    return zipPath;
-  }
+  const blob = zipEntry ? path.join(blobDir, zipEntry.name) : blobDir;
 
-  elog(
-    `✅ Shard ${shardId} produced blob files (no zip). Returning directory: ${blobDir}`,
-  );
-  return blobDir;
+  if (zipEntry) elog(`✅ Blob zip: ${blob}`);
+  else elog(`✅ Blob dir: ${blob}`);
+
+  return { blob, exitCode };
 }

@@ -162,7 +162,7 @@ async function main() {
     String(taskIndex),
   );
 
-  const blobArtifact = await runTests(
+  const { blob, exitCode } = await runTests(
     reportDir,
     shardIndex1Based,
     shardCount,
@@ -170,12 +170,14 @@ async function main() {
     repoDir,
   );
 
-  console.log(`📦 Blob artifact returned from runTests(): ${blobArtifact}`);
+  await uploadShardBlob(blob, REPORT_BUCKET, RUN_ID, taskIndex);
 
-  await uploadShardBlob(blobArtifact, REPORT_BUCKET, RUN_ID, taskIndex);
-
+  if (exitCode !== 0) {
+    console.error(
+      `⚠️ Shard ${taskIndex} had test failures (exitCode=${exitCode}). Upload succeeded; continuing.`,
+    );
+  }
   console.log(`✅ Shard ${shardIndex1Based}/${shardCount} upload completed`);
-  console.log(`📍 Uploaded to prefix: gs://${REPORT_BUCKET}/${RUN_ID}/blobs/`);
 
   if (taskIndex === 0) {
     console.log(
@@ -196,8 +198,6 @@ async function main() {
     console.log("✅ MERGE COMPLETED");
     console.log(`📍 HTML: gs://${REPORT_BUCKET}/${indexObject}`);
     console.log("====================================================");
-  } else {
-    console.log(`ℹ️ Non-coordinator shard done (taskIndex=${taskIndex})`);
   }
 
   console.log("✅ Worker done");
