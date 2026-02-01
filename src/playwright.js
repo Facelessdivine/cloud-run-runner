@@ -21,24 +21,11 @@ function listDirDetailed(dir) {
   });
 }
 
-function findRepoConfig(repoDir) {
-  const candidates = [
-    "playwright.config.ts",
-    "playwright.config.mts",
-    "playwright.config.js",
-    "playwright.config.mjs",
-    "playwright.config.cjs",
-  ].map((f) => path.join(repoDir, f));
-
-  for (const p of candidates) if (fs.existsSync(p)) return p;
-  return null;
-}
-
 /**
- * Runs tests for a shard producing a blob report that can be merged later.
- * Also enforces artifact capture on failures (trace/video/screenshot).
+ * Force a stable Playwright config for sharding + blob merge.
+ * We do NOT load the repo config to avoid reporter override / TS/ESM issues.
  *
- * Returns: blob zip path OR blobDir (directory)
+ * Returns: blob zip path OR blobDir (directory).
  */
 export async function runTests(
   reportDir,
@@ -55,58 +42,36 @@ export async function runTests(
   const artifactsDir = path.join(reportDir, "artifacts");
   fs.mkdirSync(artifactsDir, { recursive: true });
 
-  // Keep this stable across shards (important for merge)
+  // IMPORTANT: stable testDir across shards for merge stability
   const testDir = path.join(repoDir, "tests");
 
-  const repoConfigPath = findRepoConfig(repoDir);
-
-  const cfgPath = path.join(reportDir, "pw.overlay.config.cjs");
+  // Force config file
+  const cfgPath = path.join(reportDir, "pw.forced.config.cjs");
   fs.writeFileSync(
     cfgPath,
     `
-const fs = require('fs');
-const path = require('path');
-
-const repoDir = ${JSON.stringify(repoDir)};
-const testDir = ${JSON.stringify(testDir)};
-const blobDir = ${JSON.stringify(blobDir)};
-const artifactsDir = ${JSON.stringify(artifactsDir)};
-const repoConfigPath = ${JSON.stringify(repoConfigPath || "")};
-
-// Try to load repo config if present, else use empty base.
-let base = {};
-if (repoConfigPath && fs.existsSync(repoConfigPath)) {
-  // require() supports .js/.cjs; for .ts/.mjs this may fail.
-  // If it fails, we fall back to empty base and rely on our forced config.
-  try { base = require(repoConfigPath); } catch (e) { base = {}; }
-}
-
+/** @type {import('@playwright/test').PlaywrightTestConfig} */
 module.exports = {
-  ...base,
+  testDir: ${JSON.stringify(testDir)},
 
-  // ✅ enforce consistent testDir for merge stability
-  testDir,
-
-  // ✅ shard at test-case level even if single file
+  // shard at test-case level even if all tests are in one spec
   fullyParallel: true,
 
-  // keep 1 worker per shard process
+  // one worker per shard process
   workers: 1,
 
-  // ✅ artifacts on failure (your request)
+  // artifacts on failure (your requirement)
   use: {
-    ...(base.use || {}),
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    // Keep outputs under our shard folder
-    outputDir: artifactsDir,
+    outputDir: ${JSON.stringify(artifactsDir)},
   },
 
-  // ✅ ensure blob reporter exists for merge
+  // REQUIRED for merge
   reporter: [
     ['line'],
-    ['blob', { outputDir: blobDir }],
+    ['blob', { outputDir: ${JSON.stringify(blobDir)} }],
   ],
 };
 `.trim() + "\n",
@@ -120,9 +85,8 @@ module.exports = {
   elog(`blobDir=${blobDir}`);
   elog(`artifactsDir=${artifactsDir}`);
   elog(`cfgPath=${cfgPath}`);
-  if (repoConfigPath) elog(`repoConfigDetected=${repoConfigPath}`);
-  else elog(`repoConfigDetected=NONE`);
 
+  // Force config usage explicitly
   const cmd = `npx playwright test --config="${cfgPath}" --shard=${shardIndex1Based}/${shardCount}`;
 
   try {
@@ -142,8 +106,15 @@ module.exports = {
   const detailed = listDirDetailed(blobDir);
   elog(`📂 blobDir entries (${detailed.length}):`, detailed);
 
-  if (detailed.length === 0)
+  if (detailed.length === 0) {
+    // Extra debugging to see where Playwright wrote output
+    const reportDirEntries = listDirDetailed(reportDir);
+    elog(
+      `🧩 reportDir entries (${reportDirEntries.length}):`,
+      reportDirEntries,
+    );
     throw new Error(`Blob report directory is empty: ${blobDir}`);
+  }
 
   const zipEntry = detailed.find((e) => e.isFile && e.name.endsWith(".zip"));
   if (zipEntry) {
