@@ -8,6 +8,8 @@ import { uploadShardBlob } from "./upload.js";
 import { ensureWorkspace } from "./workspace.js";
 
 const storage = new Storage();
+process.env.REPORT_BUCKET = "pw-artifacts-demo-1763046256" || null;
+process.env.WORKSPACE_BUCKET = "workspace_bucket_00001" || null;
 const { TEST_REPO_URL, TEST_REPO_REF = "main", REPORT_BUCKET } = process.env;
 
 function repoNameFromUrl(url) {
@@ -131,7 +133,7 @@ async function main() {
   const shardCount = Number(process.env.CLOUD_RUN_TASK_COUNT || 1);
   const shardIndex1Based = taskIndex + 1;
 
-  const baseIdRaw = process.env.JOB_ID || repoNameFromUrl(TEST_REPO_URL);
+  const baseIdRaw = repoNameFromUrl(TEST_REPO_URL);
   const baseId = String(baseIdRaw).replace(/[^a-zA-Z0-9._-]+/g, "-");
 
   const executionId = getExecutionId();

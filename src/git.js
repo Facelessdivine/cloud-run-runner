@@ -17,7 +17,7 @@ function safe(s) {
 export async function cloneRepo(url, ref = "main", destDir = null) {
   if (!url) throw new Error("TEST_REPO_URL missing");
 
-  const runId = process.env.RUN_ID || process.env.JOB_ID || "run";
+  const runId = process.env.RUN_ID || "run";
   const repoDir = destDir
     ? destDir
     : path.join(os.tmpdir(), `pw-repo-${safe(runId)}`, repoNameFromUrl(url));

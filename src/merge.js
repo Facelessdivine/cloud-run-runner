@@ -57,6 +57,18 @@ async function uploadDir(bucketName, localDir, destPrefix) {
     await bucket.upload(filePath, { destination: dest });
   }
 }
+const getTimestamp = () => {
+  const now = new Date();
+  return {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1, // Los meses empiezan en 0
+    day: now.getDate(),
+    hour: now.getHours(),
+    minute: now.getMinutes(),
+  };
+};
+
+console.log(getTimestamp());
 
 async function deletePrefix(bucketName, prefix) {
   const bucket = storage.bucket(bucketName);
@@ -85,7 +97,7 @@ async function deletePrefix(bucketName, prefix) {
 
 async function main() {
   const bucketName = process.env.REPORT_BUCKET;
-  const runId = process.env.JOB_ID || process.env.RUN_ID;
+  const runId = process.env.RUN_ID;
 
   if (!bucketName) throw new Error("REPORT_BUCKET missing");
   if (!runId) throw new Error("JOB_ID (RUN_ID) missing for merge");
@@ -129,7 +141,7 @@ async function main() {
   if (!fs.existsSync(indexPath))
     throw new Error(`Merged HTML index not found: ${indexPath}`);
   const repoName = repoNameFromUrl(process.env.TEST_REPO_URL);
-  const destPrefix = `${runId}/${repoName}/html/`;
+  const destPrefix = `${repoName}/${getTimestamp()}/html/`;
   elog(
     `📤 Uploading merged html: ${mergedHtmlDir} → gs://${bucketName}/${destPrefix}`,
   );
