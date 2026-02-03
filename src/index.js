@@ -3,9 +3,9 @@ import { Storage } from "@google-cloud/storage";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { cloneRepo } from "./git.js";
 import { runTests } from "./playwright.js";
 import { uploadShardBlob } from "./upload.js";
+import { ensureWorkspace } from "./workspace.js";
 
 const storage = new Storage();
 const { TEST_REPO_URL, TEST_REPO_REF = "main", REPORT_BUCKET } = process.env;
@@ -136,14 +136,21 @@ async function main() {
 
   const executionId = getExecutionId();
   const RUN_ID = executionId
-    ? `${baseId}-${executionId}`
+    ? `\$\{baseId\}-\$\{executionId\}`
     : await getOrCreateRunIdViaGcs(REPORT_BUCKET, baseId, shardCount);
+
+  process.env.RUN_ID = RUN_ID;
 
   console.log(
     `🧩 Shard: ${shardIndex1Based}/${shardCount} (taskIndex=${taskIndex})`,
   );
 
-  const repoDir = await cloneRepo(TEST_REPO_URL, TEST_REPO_REF);
+  const repoDir = await ensureWorkspace({
+    repoUrl: TEST_REPO_URL,
+    repoRef: TEST_REPO_REF,
+    bucketName: process.env.WORKSPACE_BUCKET || REPORT_BUCKET,
+    runId: RUN_ID,
+  });
 
   const reportDir = path.join(
     os.tmpdir(),

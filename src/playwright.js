@@ -80,12 +80,6 @@ module.exports = {
   );
 
   elog(`▶️ Running shard ${shardId}: ${shardIndex1Based}/${shardCount}`);
-  elog(`repoDir=${repoDir}`);
-  elog(`testDir=${testDir}`);
-  elog(`reportDir=${reportDir}`);
-  elog(`blobDir=${blobDir}`);
-  elog(`artifactsDir=${artifactsDir}`);
-  elog(`cfgPath=${cfgPath}`);
 
   const args = [
     "playwright",
@@ -125,10 +119,7 @@ module.exports = {
     elog(`✅ Playwright shard exitCode=0`);
   }
 
-  // Blob must exist to merge; if missing, that's infra/config issue.
-  elog("✅ Inspecting blob output...");
   const detailed = listDirDetailed(blobDir);
-  elog(`📂 blobDir entries (${detailed.length}):`, detailed);
 
   if (detailed.length === 0) {
     const reportDirEntries = listDirDetailed(reportDir);
