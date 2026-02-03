@@ -64,7 +64,6 @@ async function deletePrefix(bucketName, prefix) {
     const [files, , resp] = await bucket.getFiles({ prefix, pageToken });
     if (!files.length) break;
 
-    // Delete in parallel but not too crazy
     const batchSize = 100;
     for (let i = 0; i < files.length; i += batchSize) {
       const batch = files.slice(i, i + batchSize);
@@ -88,6 +87,7 @@ async function main() {
 
   const workDir = path.join(os.tmpdir(), runId);
   const blobsPrefix = `${runId}/blobs/`;
+  const workspacePrefix = `${runId}/workspace/`;
   const localBlobsDir = path.join(workDir, "blobs");
 
   elog(`🧩 Merge start`);
@@ -109,7 +109,6 @@ async function main() {
   elog(`🖥️ Running: ${mergeCmd}`);
   execSync(mergeCmd, { stdio: "inherit", env: { ...process.env, CI: "1" } });
 
-  // Playwright outputs ./playwright-report in the current working dir
   const defaultReportDir = path.join(process.cwd(), "playwright-report");
   if (!fs.existsSync(defaultReportDir)) {
     throw new Error(
@@ -133,13 +132,20 @@ async function main() {
 
   elog(`✅ Uploaded HTML: gs://${bucketName}/${runId}/final/html/index.html`);
 
-  // ✅ IMPORTANT: cleanup blobs after successful upload
-  await deletePrefix(bucketName, blobsPrefix);
-
+  await cleanupRun(bucketName, workspaceBucket, blobsPrefix, workspacePrefix);
   elog("====================================================");
   elog("✅ MERGE COMPLETED + BLOBS CLEANED");
   elog(`📍 HTML: gs://${bucketName}/${runId}/final/html/index.html`);
   elog("====================================================");
+}
+export async function cleanupRun(
+  blobsBucket,
+  workspaceBucket,
+  blobsPrefix,
+  workspacePrefix,
+) {
+  await deletePrefix(blobsBucket, `${blobsPrefix}`);
+  await deletePrefix(workspaceBucket, `${workspacePrefix}`);
 }
 
 main().catch((err) => {
