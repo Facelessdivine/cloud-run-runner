@@ -59,16 +59,8 @@ async function uploadDir(bucketName, localDir, destPrefix) {
 }
 const getTimestamp = () => {
   const now = new Date();
-  return {
-    year: now.getFullYear(),
-    month: now.getMonth() + 1, // Los meses empiezan en 0
-    day: now.getDate(),
-    hour: now.getHours(),
-    minute: now.getMinutes(),
-  };
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
 };
-
-console.log(getTimestamp());
 
 async function deletePrefix(bucketName, prefix) {
   const bucket = storage.bucket(bucketName);
@@ -141,7 +133,7 @@ async function main() {
   if (!fs.existsSync(indexPath))
     throw new Error(`Merged HTML index not found: ${indexPath}`);
   const repoName = repoNameFromUrl(process.env.TEST_REPO_URL);
-  const destPrefix = `${repoName}/${getTimestamp()}/html/`;
+  const destPrefix = `${repoName}/${getTimestamp}/html/`;
   elog(
     `📤 Uploading merged html: ${mergedHtmlDir} → gs://${bucketName}/${destPrefix}`,
   );
