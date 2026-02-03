@@ -4,6 +4,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { repoNameFromUrl } from "./git";
 
 const storage = new Storage();
 
@@ -123,14 +124,16 @@ async function main() {
   const indexPath = path.join(mergedHtmlDir, "index.html");
   if (!fs.existsSync(indexPath))
     throw new Error(`Merged HTML index not found: ${indexPath}`);
-
-  const destPrefix = `${runId}/final/html/`;
+  const repoName = repoNameFromUrl(process.env.TEST_REPO_URL);
+  const destPrefix = `${runId}/${repoName}/html/`;
   elog(
     `📤 Uploading merged html: ${mergedHtmlDir} → gs://${bucketName}/${destPrefix}`,
   );
   await uploadDir(bucketName, mergedHtmlDir, destPrefix);
 
-  elog(`✅ Uploaded HTML: gs://${bucketName}/${runId}/final/html/index.html`);
+  elog(
+    `✅ Uploaded HTML: gs://${bucketName}/${runId}/${repoName}/html/index.html`,
+  );
 
   await cleanupRun(
     bucketName,

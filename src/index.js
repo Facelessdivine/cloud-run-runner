@@ -190,12 +190,6 @@ async function main() {
       stdio: "inherit",
       env: { ...process.env, JOB_ID: RUN_ID, REPORT_BUCKET },
     });
-
-    const indexObject = `${RUN_ID}/final/html/index.html`;
-    console.log("====================================================");
-    console.log("✅ MERGE COMPLETED");
-    console.log(`📍 HTML: gs://${REPORT_BUCKET}/${indexObject}`);
-    console.log("====================================================");
   }
 
   console.log("✅ Worker done");

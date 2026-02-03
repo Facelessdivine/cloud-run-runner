@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import simpleGit from "simple-git";
 
-function repoNameFromUrl(url) {
+export function repoNameFromUrl(url) {
   const clean = url.replace(/\/+$/, "");
   const last = clean.split("/").pop() || "repo";
   return last.replace(/\.git$/i, "");
@@ -18,12 +18,10 @@ export async function cloneRepo(url, ref = "main", destDir = null) {
   if (!url) throw new Error("TEST_REPO_URL missing");
 
   const runId = process.env.RUN_ID || process.env.JOB_ID || "run";
-  const repoDir = destDir ? destDir : path.join(
-    os.tmpdir(),
-    `pw-repo-${safe(runId)}`,
-    repoNameFromUrl(url),
-  );
-if (!fs.existsSync(repoDir)) {
+  const repoDir = destDir
+    ? destDir
+    : path.join(os.tmpdir(), `pw-repo-${safe(runId)}`, repoNameFromUrl(url));
+  if (!fs.existsSync(repoDir)) {
     console.log(`Cloning ${url} (${ref}) → ${repoDir}`);
     await simpleGit().clone(url, repoDir);
 
