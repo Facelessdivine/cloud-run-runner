@@ -55,11 +55,17 @@ export async function ensureWorkspace({
   const localTgz = path.join(localRoot, "workspace.tgz");
   fs.mkdirSync(localRoot, { recursive: true });
 
+  // Use a deterministic local path across ALL tasks so Playwright blob metadata matches.
+  const extractRoot = path.join(localRoot, "extracted");
+  const extractedRepoDir = path.join(extractRoot, repoName);
+
+  fs.mkdirSync(extractRoot, { recursive: true });
+
   if (taskIndex === 0) {
     console.log(`🧰 [workspace] task0 preparing workspace for ${repoUrl}@${repoRef}`);
 
     // Clone + install ONCE (only in task 0)
-    const repoDir = await cloneRepo(repoUrl, repoRef);
+    const repoDir = await cloneRepo(repoUrl, repoRef, extractedRepoDir);
 
     // Create tarball (include node_modules for fastest fan-out)
     // Exclude VCS + common output dirs to keep the artifact smaller.
@@ -118,17 +124,13 @@ export async function ensureWorkspace({
 
   console.log(`⬇️ [workspace] downloading: gs://${bucketName}/${tgzObject} → ${localTgz}`);
   await bucket.file(tgzObject).download({ destination: localTgz });
-
-  // Extract into localRoot/extracted
-  const extractRoot = path.join(localRoot, "extracted");
-  fs.mkdirSync(extractRoot, { recursive: true });
-
-  console.log(`📂 [workspace] extracting into: ${extractRoot}`);
+  // Extract into the deterministic extractRoot
+console.log(`📂 [workspace] extracting into: ${extractRoot}`);
   execSync(["tar", "-xzf", localTgz, "-C", extractRoot].join(" "), {
     stdio: "inherit",
   });
 
-  const extractedRepoDir = path.join(extractRoot, repoName);
+
   if (!fs.existsSync(extractedRepoDir)) {
     // If repoName doesn't match folder (rare), fall back to first directory
     const entries = fs.readdirSync(extractRoot);
