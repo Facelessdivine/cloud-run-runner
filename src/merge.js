@@ -132,7 +132,12 @@ async function main() {
 
   elog(`✅ Uploaded HTML: gs://${bucketName}/${runId}/final/html/index.html`);
 
-  await cleanupRun(bucketName, workspaceBucket, blobsPrefix, workspacePrefix);
+  await cleanupRun(
+    bucketName,
+    blobsPrefix,
+    process.env.WORKSPACE_BUCKET,
+    workspacePrefix,
+  );
   elog("====================================================");
   elog("✅ MERGE COMPLETED + BLOBS CLEANED");
   elog(`📍 HTML: gs://${bucketName}/${runId}/final/html/index.html`);
@@ -140,8 +145,8 @@ async function main() {
 }
 export async function cleanupRun(
   blobsBucket,
-  workspaceBucket,
   blobsPrefix,
+  workspaceBucket,
   workspacePrefix,
 ) {
   await deletePrefix(blobsBucket, `${blobsPrefix}`);
