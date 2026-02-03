@@ -4,12 +4,16 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { repoNameFromUrl } from "./git";
 
 const storage = new Storage();
 
 function elog(...args) {
   console.error(...args);
+}
+function repoNameFromUrl(url) {
+  const clean = url.replace(/\/+$/, "");
+  const last = clean.split("/").pop() || "repo";
+  return last.replace(/\.git$/i, "");
 }
 
 async function downloadPrefix(bucketName, prefix, localDir) {
@@ -143,7 +147,7 @@ async function main() {
   );
   elog("====================================================");
   elog("✅ MERGE COMPLETED + BLOBS CLEANED");
-  elog(`📍 HTML: gs://${bucketName}/${runId}/final/html/index.html`);
+  elog(`📍 HTML: gs://${bucketName}/${runId}/${repoName}/html/index.html`);
   elog("====================================================");
 }
 export async function cleanupRun(
