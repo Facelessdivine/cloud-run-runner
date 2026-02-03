@@ -133,7 +133,7 @@ async function main() {
   if (!fs.existsSync(indexPath))
     throw new Error(`Merged HTML index not found: ${indexPath}`);
   const repoName = repoNameFromUrl(process.env.TEST_REPO_URL);
-  const destPrefix = `${repoName}/${getTimestamp()}/html/`;
+  const destPrefix = `${repoName}/${getTimestamp()}-${process.env.TEST_REPO_REF}/html/`;
   elog(
     `📤 Uploading merged html: ${mergedHtmlDir} → gs://${bucketName}/${destPrefix}`,
   );
