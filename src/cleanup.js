@@ -9,5 +9,4 @@ export async function cleanupBlobs(bucketName, prefix) {
   const [files] = await bucket.getFiles({ prefix });
 
   await Promise.all(files.map((f) => f.delete()));
-  console.log(`🗑️ Deleted ${files.length} files`);
 }
