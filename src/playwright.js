@@ -1,4 +1,3 @@
-// src/playwright.js
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -58,10 +57,8 @@ module.exports = {
   fullyParallel: true,
   workers: 1,
 
-  // ✅ retry failed tests twice
   retries: 2,
 
-  // ✅ artifacts on failure
   use: {
     trace: 'retain-on-failure',
     video: 'retain-on-failure',

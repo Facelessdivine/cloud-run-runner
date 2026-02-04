@@ -8,9 +8,10 @@ import { uploadShardBlob } from "./upload.js";
 import { ensureWorkspace } from "./workspace.js";
 
 const storage = new Storage();
-process.env.REPORT_BUCKET = "pw-artifacts-demo-1763046256" || null;
-process.env.WORKSPACE_BUCKET = "workspace_bucket_00001" || null;
-const { TEST_REPO_URL, TEST_REPO_REF = "main", REPORT_BUCKET } = process.env;
+const { TEST_REPO_URL, TEST_REPO_REF = "main" } = process.env;
+const REPORTS_BUCKET = process.env.REPORTS_BUCKET || process.env.REPORTS_BUCKET;
+const WORKSPACE_BUCKET = process.env.WORKSPACE_BUCKET || REPORTS_BUCKET;
+
 
 function repoNameFromUrl(url) {
   const clean = url.replace(/\/+$/, "");
@@ -126,8 +127,10 @@ async function waitForAllBlobs(
 async function main() {
   console.log("🚀 Worker starting");
 
+  process.env.RUN_STARTED_AT = process.env.RUN_STARTED_AT || new Date().toISOString();
+
   if (!TEST_REPO_URL) throw new Error("TEST_REPO_URL missing");
-  if (!REPORT_BUCKET) throw new Error("REPORT_BUCKET missing");
+  if (!REPORTS_BUCKET) throw new Error("REPORTS_BUCKET (or REPORTS_BUCKET) missing");
 
   const taskIndex = Number(process.env.CLOUD_RUN_TASK_INDEX || 0);
   const shardCount = Number(process.env.CLOUD_RUN_TASK_COUNT || 1);
@@ -139,7 +142,7 @@ async function main() {
   const executionId = getExecutionId();
   const RUN_ID = executionId
     ? `${baseId}-${executionId}`
-    : await getOrCreateRunIdViaGcs(REPORT_BUCKET, baseId, shardCount);
+    : await getOrCreateRunIdViaGcs(REPORTS_BUCKET, baseId, shardCount);
 
   process.env.RUN_ID = RUN_ID;
 
@@ -150,7 +153,7 @@ async function main() {
   const repoDir = await ensureWorkspace({
     repoUrl: TEST_REPO_URL,
     repoRef: TEST_REPO_REF,
-    bucketName: process.env.WORKSPACE_BUCKET || REPORT_BUCKET,
+    bucketName: WORKSPACE_BUCKET,
     runId: RUN_ID,
   });
 
@@ -170,7 +173,7 @@ async function main() {
     repoDir,
   );
 
-  await uploadShardBlob(blob, REPORT_BUCKET, RUN_ID, taskIndex);
+  await uploadShardBlob(blob, REPORTS_BUCKET, RUN_ID, taskIndex);
 
   if (exitCode !== 0) {
     console.error(
@@ -184,13 +187,13 @@ async function main() {
       "👑 Coordinator: waiting for all shard blobs before merging...",
     );
 
-    const found = await waitForAllBlobs(REPORT_BUCKET, RUN_ID, shardCount);
+    const found = await waitForAllBlobs(REPORTS_BUCKET, RUN_ID, shardCount);
     console.log(`✅ All blobs present (${found.length}). Example: ${found[0]}`);
 
     console.log("🧩 All blobs present. Running merge.js");
     execSync("node /app/src/merge.js", {
       stdio: "inherit",
-      env: { ...process.env, JOB_ID: RUN_ID, REPORT_BUCKET },
+      env: { ...process.env, RUN_ID: RUN_ID, REPORTS_BUCKET },
     });
   }
 
