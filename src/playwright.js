@@ -21,12 +21,37 @@ function listDirDetailed(dir) {
 }
 
 /**
+ * Parse browsers selection for Playwright projects.
+ *
+ * Supported:
+ *  - "chromium" | "firefox" | "webkit"
+ *  - "all" (default)
+ *  - "chromium,firefox" / "chromium firefox" etc.
+ */
+function parseBrowsersEnv(value) {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return ["chromium"];
+  if (raw === "all") return ["chromium", "firefox", "webkit"];
+
+  const parts = raw
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const allowed = new Set(["chromium", "firefox", "webkit"]);
+  const selected = parts.filter((p) => allowed.has(p));
+
+  // If user provided invalid values, fallback to all
+  return selected.length ? selected : ["chromium", "firefox", "webkit"];
+}
+
+/**
  * Force stable config for sharding + blob merge.
  * - Does NOT fail worker on test failures (non-zero exit).
- * - Retries failed tests 2 times.
  * - Produces blob report regardless of failures.
  *
- * Returns: { blob: string, exitCode: number }
+ * Returns: { blob: string, junit: string, exitCode: number }
  *   blob is a zip path OR blobDir.
  */
 export async function runTests(
@@ -42,10 +67,9 @@ export async function runTests(
   fs.mkdirSync(blobDir, { recursive: true });
 
   const artifactsDir = path.join(reportDir, "artifacts");
-
-  const junitFile = path.join(reportDir, `results-shard-${shardId}.xml`);
   fs.mkdirSync(artifactsDir, { recursive: true });
 
+  const junitFile = path.join(reportDir, `results-shard-${shardId}.xml`);
   const testDir = path.join(repoDir, "tests");
 
   // ✅ Prefer the repo's own Playwright config, but override ONLY what the runner needs:
@@ -53,14 +77,7 @@ export async function runTests(
   // - ensure blob reporter output (required for merge-reports)
   // - force workers=1 inside each Cloud Run task
   // - force use.outputDir into reportDir/artifacts to keep traces/videos with the shard payload
-  const cfgCandidates = [
-    "playwright.config.ts",
-    "playwright.config.mts",
-    "playwright.config.cts",
-    "playwright.config.js",
-    "playwright.config.mjs",
-    "playwright.config.cjs",
-  ];
+  const cfgCandidates = ["playwright.config.ts"];
 
   const baseCfgFile = cfgCandidates.find((f) =>
     fs.existsSync(path.join(repoDir, f)),
@@ -160,13 +177,27 @@ module.exports = {
     );
   }
 
-  elog(`▶️ Running shard ${shardId}: ${shardIndex1Based}/${shardCount}`);
+  // ✅ Browser parametrization via Playwright projects:
+  // PW_BROWSERS examples:
+  //   chromium
+  //   firefox
+  //   webkit
+  //   all
+  //   chromium,firefox
+  const browsers = parseBrowsersEnv(
+    process.env.PW_BROWSERS || process.env.BROWSERS,
+  );
+
+  elog(
+    `▶️ Running shard ${shardId}: ${shardIndex1Based}/${shardCount} | browsers=${browsers.join(",")}`,
+  );
 
   const args = [
     "playwright",
     "test",
     `--config=${cfgPath}`,
     `--shard=${shardIndex1Based}/${shardCount}`,
+    ...browsers.map((b) => `--project=${b}`),
   ];
 
   // Use npx so it picks the installed Playwright in the cloned repo
