@@ -48,27 +48,107 @@ export async function runTests(
 
   const testDir = path.join(repoDir, "tests");
 
-  const cfgPath = path.join(reportDir, "pw.forced.config.cjs");
-  fs.writeFileSync(
-    cfgPath,
-    `
+  // ✅ Prefer the repo's own Playwright config, but override ONLY what the runner needs:
+  // - ensure shard-stable JUnit output per shard (so shards don't overwrite each other)
+  // - ensure blob reporter output (required for merge-reports)
+  // - force workers=1 inside each Cloud Run task
+  // - force use.outputDir into reportDir/artifacts to keep traces/videos with the shard payload
+  const cfgCandidates = [
+    "playwright.config.ts",
+    "playwright.config.mts",
+    "playwright.config.cts",
+    "playwright.config.js",
+    "playwright.config.mjs",
+    "playwright.config.cjs",
+  ];
+
+  const baseCfgFile = cfgCandidates.find((f) =>
+    fs.existsSync(path.join(repoDir, f)),
+  );
+  let cfgPath = "";
+
+  if (baseCfgFile) {
+    const wrapperExt = /\.(ts|mts|cts)$/i.test(baseCfgFile) ? "ts" : "mjs";
+    cfgPath = path.join(repoDir, `.pw.runner.config.${wrapperExt}`);
+
+    // Create a thin wrapper config that imports the team's config and overrides only runner-required bits.
+    fs.writeFileSync(
+      cfgPath,
+      `
+import baseConfig from "./${baseCfgFile}";
+import { defineConfig } from "@playwright/test";
+
+const reportDir = process.env.PW_REPORT_DIR || ".";
+const shardId = process.env.PW_SHARD_ID || "0";
+
+const junitFile = \`\${reportDir}/results-shard-\${shardId}.xml\`;
+const blobDir = \`\${reportDir}/blob-report\`;
+const artifactsDir = \`\${reportDir}/artifacts\`;
+
+function normalizeReporter(r) {
+  if (!r) return [];
+  if (typeof r === "string") return [[r]];
+  if (Array.isArray(r)) return r;
+  return [];
+}
+
+const base = baseConfig?.default ?? baseConfig;
+const baseReporter = normalizeReporter(base?.reporter);
+
+let nextReporter = baseReporter.map((entry) => {
+  // entry can be: ["junit", { outputFile: "..." }] or ["list"] etc.
+  if (!Array.isArray(entry) || entry.length === 0) return entry;
+
+  const name = entry[0];
+  const opts = entry[1] ?? {};
+
+  if (name === "junit") {
+    return ["junit", { ...opts, outputFile: junitFile }];
+  }
+  return entry;
+});
+
+const hasJunit = nextReporter.some((e) => Array.isArray(e) && e[0] === "junit");
+const hasBlob = nextReporter.some((e) => Array.isArray(e) && e[0] === "blob");
+
+// Ensure JUnit exists even if the base config didn't include it
+if (!hasJunit) nextReporter.push(["junit", { outputFile: junitFile }]);
+// Ensure blob exists for merge-reports
+if (!hasBlob) nextReporter.push(["blob", { outputDir: blobDir }]);
+
+export default defineConfig({
+  ...base,
+  // Runner requirement: keep each shard stable in Cloud Run
+  workers: 1,
+  // Preserve team's config, override only what we need
+  reporter: nextReporter,
+  use: {
+    ...(base?.use ?? {}),
+    // Runner requirement: collect artifacts into the shard report directory
+    outputDir: artifactsDir,
+  },
+});
+`.trim() + "\n",
+      "utf-8",
+    );
+  } else {
+    // Fallback: no config found in repo. Use a minimal stable config.
+    cfgPath = path.join(reportDir, "pw.forced.config.cjs");
+    fs.writeFileSync(
+      cfgPath,
+      `
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
 module.exports = {
   testDir: ${JSON.stringify(testDir)},
-
   fullyParallel: true,
   workers: 1,
-
   retries: 2,
-
   use: {
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
     outputDir: ${JSON.stringify(artifactsDir)},
   },
-
-  // ✅ required for merge
   reporter: [
     ['line'],
     ['junit', { outputFile: ${JSON.stringify(junitFile)} }],
@@ -76,8 +156,9 @@ module.exports = {
   ],
 };
 `.trim() + "\n",
-    "utf-8",
-  );
+      "utf-8",
+    );
+  }
 
   elog(`▶️ Running shard ${shardId}: ${shardIndex1Based}/${shardCount}`);
 
@@ -91,7 +172,13 @@ module.exports = {
   // Use npx so it picks the installed Playwright in the cloned repo
   const result = spawnSync("npx", args, {
     cwd: repoDir,
-    env: { ...process.env, CI: "1", PW_TEST_NO_COLOR: "1" },
+    env: {
+      ...process.env,
+      CI: "1",
+      PW_TEST_NO_COLOR: "1",
+      PW_REPORT_DIR: reportDir,
+      PW_SHARD_ID: String(shardId),
+    },
     stdio: "inherit",
   });
 
