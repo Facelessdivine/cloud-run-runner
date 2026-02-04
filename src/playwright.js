@@ -159,8 +159,14 @@ module.exports = {
   testDir: ${JSON.stringify(testDir)},
   fullyParallel: true,
   workers: 1,
-  retries: 2,
+  retries: 1,
+  
   use: {
+  /* Maximum time each action can take */
+    actionTimeout: 5000,
+    
+    /* Maximum time to wait for element */
+    navigationTimeout: 15000,
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
