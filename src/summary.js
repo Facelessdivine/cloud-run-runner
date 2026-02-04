@@ -1,10 +1,6 @@
+// src/summary.js
 import fs from "node:fs";
-import { XMLParser } from "fast-xml-parser";
 
-function asArray(v) {
-  if (!v) return [];
-  return Array.isArray(v) ? v : [v];
-}
 function safeInt(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -12,55 +8,48 @@ function safeInt(v, fallback = 0) {
 
 export function parseJUnitTotals(junitXmlPath) {
   const xml = fs.readFileSync(junitXmlPath, "utf-8");
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
-  const doc = parser.parse(xml);
 
-  const suites = doc.testsuites?.testsuite
-    ? asArray(doc.testsuites.testsuite)
-    : asArray(doc.testsuite);
-
+  // Match <testsuite ...> opening tags and read attributes
+  const re = /<testsuite\b([^>]*)>/g;
+  let m;
   let total = 0, failures = 0, skipped = 0;
-  for (const s of suites) {
-    total += safeInt(s.tests);
-    failures += safeInt(s.failures) + safeInt(s.errors);
-    skipped += safeInt(s.skipped);
+  while ((m = re.exec(xml)) !== null) {
+    const attrs = m[1] || "";
+    const get = (name) => {
+      const mm = new RegExp(`${name}="([^"]*)"`).exec(attrs);
+      return mm ? mm[1] : "";
+    };
+    total += safeInt(get("tests"));
+    failures += safeInt(get("failures")) + safeInt(get("errors"));
+    skipped += safeInt(get("skipped"));
   }
   const passed = Math.max(total - failures - skipped, 0);
   return { total, passed, failed: failures, skipped };
 }
 
-export function buildSummary({
-  runId,
-  project,
-  branch,
-  commit,
-  startedAt,
-  finishedAt,
-  durationSec,
-  shards,
-  junitLocalPath,
-  htmlPrefixInBucket,
-  junitPathInBucket,
-  meta,
-}) {
-  const tests = parseJUnitTotals(junitLocalPath);
+export function buildSummaryFromJUnit(params) {
+  const tests = parseJUnitTotals(params.junitLocalPath);
   const status = tests.failed > 0 ? "failed" : "passed";
+  const durationSec = Math.max(
+    0,
+    Math.round((new Date(params.finishedAt).getTime() - new Date(params.startedAt).getTime()) / 1000),
+  );
 
   return {
-    runId,
-    project,
-    branch,
-    commit,
-    startedAt,
-    finishedAt,
+    runId: params.runId,
+    project: params.project,
+    branch: params.branch,
+    commit: params.commit,
+    startedAt: params.startedAt,
+    finishedAt: params.finishedAt,
     durationSec,
     status,
     tests,
-    shards,
+    shards: params.shards,
     links: {
-      htmlPrefix: htmlPrefixInBucket,
-      junitPath: junitPathInBucket,
+      htmlPrefix: params.htmlPrefixInBucket,
+      junitPath: params.junitPathInBucket,
     },
-    meta: meta ?? {},
+    meta: params.meta ?? {},
   };
 }

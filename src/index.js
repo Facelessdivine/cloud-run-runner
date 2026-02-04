@@ -4,14 +4,11 @@ import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { runTests } from "./playwright.js";
-import { uploadShardBlob } from "./upload.js";
+import { uploadShardBlob, uploadShardJUnit } from "./upload.js";
 import { ensureWorkspace } from "./workspace.js";
 
 const storage = new Storage();
-const { TEST_REPO_URL, TEST_REPO_REF = "main" } = process.env;
-const REPORTS_BUCKET = process.env.REPORTS_BUCKET || process.env.REPORTS_BUCKET;
-const WORKSPACE_BUCKET = process.env.WORKSPACE_BUCKET || REPORTS_BUCKET;
-
+const { TEST_REPO_URL, TEST_REPO_REF = "main", REPORT_BUCKET } = process.env;
 
 function repoNameFromUrl(url) {
   const clean = url.replace(/\/+$/, "");
@@ -127,10 +124,8 @@ async function waitForAllBlobs(
 async function main() {
   console.log("🚀 Worker starting");
 
-  process.env.RUN_STARTED_AT = process.env.RUN_STARTED_AT || new Date().toISOString();
-
   if (!TEST_REPO_URL) throw new Error("TEST_REPO_URL missing");
-  if (!REPORTS_BUCKET) throw new Error("REPORTS_BUCKET (or REPORTS_BUCKET) missing");
+  if (!REPORT_BUCKET) throw new Error("REPORT_BUCKET missing");
 
   const taskIndex = Number(process.env.CLOUD_RUN_TASK_INDEX || 0);
   const shardCount = Number(process.env.CLOUD_RUN_TASK_COUNT || 1);
@@ -142,7 +137,7 @@ async function main() {
   const executionId = getExecutionId();
   const RUN_ID = executionId
     ? `${baseId}-${executionId}`
-    : await getOrCreateRunIdViaGcs(REPORTS_BUCKET, baseId, shardCount);
+    : await getOrCreateRunIdViaGcs(REPORT_BUCKET, baseId, shardCount);
 
   process.env.RUN_ID = RUN_ID;
 
@@ -153,7 +148,7 @@ async function main() {
   const repoDir = await ensureWorkspace({
     repoUrl: TEST_REPO_URL,
     repoRef: TEST_REPO_REF,
-    bucketName: WORKSPACE_BUCKET,
+    bucketName: process.env.WORKSPACE_BUCKET || REPORT_BUCKET,
     runId: RUN_ID,
   });
 
@@ -165,7 +160,7 @@ async function main() {
     String(taskIndex),
   );
 
-  const { blob, exitCode } = await runTests(
+  const { blob, junit, exitCode } = await runTests(
     reportDir,
     shardIndex1Based,
     shardCount,
@@ -173,7 +168,8 @@ async function main() {
     repoDir,
   );
 
-  await uploadShardBlob(blob, REPORTS_BUCKET, RUN_ID, taskIndex);
+  await uploadShardBlob(blob, REPORT_BUCKET, RUN_ID, taskIndex);
+  await uploadShardJUnit(junit, REPORT_BUCKET, RUN_ID, taskIndex);
 
   if (exitCode !== 0) {
     console.error(
@@ -187,13 +183,13 @@ async function main() {
       "👑 Coordinator: waiting for all shard blobs before merging...",
     );
 
-    const found = await waitForAllBlobs(REPORTS_BUCKET, RUN_ID, shardCount);
+    const found = await waitForAllBlobs(REPORT_BUCKET, RUN_ID, shardCount);
     console.log(`✅ All blobs present (${found.length}). Example: ${found[0]}`);
 
     console.log("🧩 All blobs present. Running merge.js");
     execSync("node /app/src/merge.js", {
       stdio: "inherit",
-      env: { ...process.env, RUN_ID: RUN_ID, REPORTS_BUCKET },
+      env: { ...process.env, JOB_ID: RUN_ID, REPORT_BUCKET },
     });
   }
 

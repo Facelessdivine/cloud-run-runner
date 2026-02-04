@@ -63,3 +63,20 @@ export async function uploadShardBlob(blobPath, bucketName, runId, taskIndex) {
     `uploadShardBlob: path does not exist or is not file/dir: ${blobPath}`,
   );
 }
+
+
+/**
+ * Upload per-shard JUnit XML.
+ * Destination:
+ *   gs://bucket/<runId>/junit/shard-<taskIndex>.xml
+ */
+export async function uploadShardJUnit(junitPath, bucketName, runId, taskIndex) {
+  const bucket = storage.bucket(bucketName);
+  if (!isFile(junitPath)) {
+    console.warn(`⚠️ uploadShardJUnit: junit file not found: ${junitPath} (continuing)`);
+    return;
+  }
+  const dest = `${runId}/junit/shard-${taskIndex}.xml`;
+  console.log(`📤 Uploading junit ${path.basename(junitPath)} → gs://${bucketName}/${dest}`);
+  await bucket.upload(junitPath, { destination: dest });
+}

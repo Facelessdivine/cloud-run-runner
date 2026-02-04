@@ -42,6 +42,8 @@ export async function runTests(
   fs.mkdirSync(blobDir, { recursive: true });
 
   const artifactsDir = path.join(reportDir, "artifacts");
+
+  const junitFile = path.join(reportDir, `results-shard-${shardId}.xml`);
   fs.mkdirSync(artifactsDir, { recursive: true });
 
   const testDir = path.join(repoDir, "tests");
@@ -69,6 +71,7 @@ module.exports = {
   // ✅ required for merge
   reporter: [
     ['line'],
+    ['junit', { outputFile: ${JSON.stringify(junitFile)} }],
     ['blob', { outputDir: ${JSON.stringify(blobDir)} }],
   ],
 };
@@ -133,5 +136,5 @@ module.exports = {
   if (zipEntry) elog(`✅ Blob zip: ${blob}`);
   else elog(`✅ Blob dir: ${blob}`);
 
-  return { blob, exitCode };
+  return { blob, junit: junitFile, exitCode };
 }
