@@ -2,6 +2,64 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+function normalizeSlashes(p) {
+  return String(p).replace(/\\/g, "/");
+}
+
+function parseListLocations(output, expectedProject) {
+  // Example line:
+  //   [chromium] › regression\\foo.spec.ts:11:9 › Suite › test title
+  // Or:
+  //   regression/foo.spec.ts:11:9 › Suite › test title
+  const lines = String(output || "").split(/\r?\n/);
+  const locs = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // Prefer the bracketed project prefix when present.
+    // Capture location token right after the first "›".
+    const m = line.match(/^\[([^\]]+)\]\s+›\s+([^›]+?)\s+›/);
+    if (m) {
+      const project = m[1].trim().toLowerCase();
+      if (expectedProject && project !== expectedProject.toLowerCase()) continue;
+      locs.push(m[2].trim());
+      continue;
+    }
+
+    // Fallback: some configs might not print [project]
+    const m2 = line.match(/^([^›]+?)\s+›/);
+    if (m2) locs.push(m2[1].trim());
+  }
+  return locs;
+}
+
+function resolveSelector(repoDir, location) {
+  // location is like: regression/foo.spec.ts:11:9
+  // Playwright CLI expects a path relative to repo root.
+  // If the location is relative to testDir (commonly "tests"), prefix it.
+  const loc = normalizeSlashes(location);
+  const filePart = loc.split(":")[0];
+  const suffix = loc.slice(filePart.length); // includes :line:col
+
+  const cand1 = path.join(repoDir, filePart);
+  const cand2 = path.join(repoDir, "tests", filePart);
+
+  if (fs.existsSync(cand1)) return normalizeSlashes(filePart + suffix);
+  if (fs.existsSync(cand2)) return normalizeSlashes(path.join("tests", filePart) + suffix);
+
+  // Best effort
+  return normalizeSlashes(filePart + suffix);
+}
+
+function roundRobinAssign(items, shardIndex0, shardCount) {
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    if (i % shardCount === shardIndex0) out.push(items[i]);
+  }
+  return out;
+}
+
 function elog(...args) {
   console.error(...args);
 }
@@ -167,7 +225,7 @@ module.exports = {
     
     /* Maximum time to wait for element */
     navigationTimeout: 15000,
-    trace: 'retain-on-failure',
+    trace: 'on-first-retry',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
     outputDir: ${JSON.stringify(artifactsDir)},
@@ -194,43 +252,124 @@ module.exports = {
     process.env.PW_BROWSERS || process.env.BROWSERS,
   );
 
-  elog(
-    `▶️ Running shard ${shardId}: ${shardIndex1Based}/${shardCount} | browsers=${browsers.join(",")}`,
-  );
+  // ✅ Even distribution by *test count* (not by file/grouping)
+  // We ask Playwright to list tests for each project, then we round-robin assign them.
+  const shardIndex0 = Math.max(0, Number(shardIndex1Based) - 1);
 
-  const args = [
-    "playwright",
-    "test",
-    `--config=${cfgPath}`,
-    `--shard=${shardIndex1Based}/${shardCount}`,
-    ...browsers.map((b) => `--project=${b}`),
-  ];
+  // Build a global, stable list of tests across the selected projects.
+  const discovered = [];
+  for (const project of browsers) {
+    const list = spawnSync(
+      "npx",
+      [
+        "playwright",
+        "test",
+        `--config=${cfgPath}`,
+        `--project=${project}`,
+        "--list",
+      ],
+      {
+        cwd: repoDir,
+        env: {
+          ...process.env,
+          CI: "1",
+          PW_TEST_NO_COLOR: "1",
+          PW_REPORT_DIR: reportDir,
+          PW_SHARD_ID: String(shardId),
+        },
+        encoding: "utf-8",
+      },
+    );
 
-  // Use npx so it picks the installed Playwright in the cloned repo
-  const result = spawnSync("npx", args, {
-    cwd: repoDir,
-    env: {
-      ...process.env,
-      CI: "1",
-      PW_TEST_NO_COLOR: "1",
-      PW_REPORT_DIR: reportDir,
-      PW_SHARD_ID: String(shardId),
-    },
-    stdio: "inherit",
-  });
-
-  // spawnSync returns null code if terminated by signal
-  const exitCode = typeof result.status === "number" ? result.status : 1;
-
-  if (result.error) {
-    // This is a REAL infra error (can't spawn process)
-    elog("❌ Failed to start Playwright process:", result.error);
-    throw result.error;
+    // Even if list exits non-zero (rare), still try to parse stdout.
+    const stdout = String(list.stdout || "");
+    const stderr = String(list.stderr || "");
+    const locs = parseListLocations(stdout + "\n" + stderr, project);
+    for (const loc of locs) {
+      discovered.push({ project, location: loc });
+    }
   }
 
-  if (result.signal) {
-    // Also infra-level (killed)
-    throw new Error(`Playwright terminated by signal: ${result.signal}`);
+  elog(
+    `🧮 Distributing tests evenly | shard=${shardIndex1Based}/${shardCount} | projects=${browsers.join(",")} | totalTests=${discovered.length}`,
+  );
+
+  const assigned = roundRobinAssign(discovered, shardIndex0, shardCount);
+
+  // Group assigned tests by project so we can run per-project without re-listing.
+  const byProject = new Map();
+  for (const t of assigned) {
+    const arr = byProject.get(t.project) || [];
+    arr.push(t);
+    byProject.set(t.project, arr);
+  }
+
+  // Build the exact selectors we will execute (path:line:col), matching Playwright CLI.
+  // This gives per-test distribution instead of per-file.
+  const projectRuns = [];
+  for (const [project, tests] of byProject.entries()) {
+    const selectors = tests.map((t) => resolveSelector(repoDir, t.location));
+    projectRuns.push({ project, selectors });
+  }
+
+  if (projectRuns.length === 0) {
+    // If there are truly no tests (or shardCount > totalTests), still run a no-op
+    // Playwright invocation so that blob/junit reporters get created.
+    const fallbackProject = browsers[0] || "chromium";
+    elog(
+      `⚠️ No tests assigned to shard ${shardId}. Running no-op Playwright command to produce reports (project=${fallbackProject}).`,
+    );
+    projectRuns.push({ project: fallbackProject, selectors: [], noOp: true });
+  }
+
+  // Construct a single Playwright run per project. (If you want max efficiency,
+  // keep browsers small; running multiple projects in one process would break per-test selection.)
+  const allResults = [];
+  for (const run of projectRuns) {
+    const { project, selectors, noOp } = run;
+    elog(
+      `▶️ Shard ${shardId}: project=${project} | assigned=${selectors.length}${noOp ? " (no-op)" : ""}`,
+    );
+
+    const args = [
+      "playwright",
+      "test",
+      `--config=${cfgPath}`,
+      `--project=${project}`,
+      ...(noOp ? ["--grep", "a^"] : selectors),
+    ];
+
+    const result = spawnSync("npx", args, {
+      cwd: repoDir,
+      env: {
+        ...process.env,
+        CI: "1",
+        PW_TEST_NO_COLOR: "1",
+        PW_REPORT_DIR: reportDir,
+        PW_SHARD_ID: String(shardId),
+      },
+      stdio: "inherit",
+    });
+
+    allResults.push(result);
+  }
+
+  // If any Playwright invocation was terminated by signal, treat as infra error.
+  const signaled = allResults.find((r) => r?.signal);
+  if (signaled?.signal) {
+    throw new Error(`Playwright terminated by signal: ${signaled.signal}`);
+  }
+
+  // Aggregate exit codes. Non-zero usually means test failures; don't throw.
+  const exitCode = allResults.some((r) => (typeof r.status === "number" ? r.status : 1) !== 0)
+    ? 1
+    : 0;
+
+  // If spawn failed at process level for any run, treat as infra error.
+  const errored = allResults.find((r) => r?.error);
+  if (errored?.error) {
+    elog("❌ Failed to start Playwright process:", errored.error);
+    throw errored.error;
   }
 
   // ✅ IMPORTANT: non-zero exitCode can be just test failures.
