@@ -294,6 +294,7 @@ module.exports = {
         "test",
         `--config=${cfgPath}`,
         `--project=${project}`,
+        "--pass-with-no-tests",
         `--shard=${shardIndex1Based}/${shardCount}`,
         ...(testRoot ? [testRoot] : []),
       ];
@@ -431,12 +432,12 @@ module.exports = {
       `▶️ Shard ${shardId}: project=${project} | assigned=${selectors.length}${noOp ? " (no-op)" : ""}`,
     );
 
-    // IMPORTANT: do NOT include testRoot here, or you'll cause overlap (UNION).
     const args = [
       "playwright",
       "test",
       `--config=${cfgPath}`,
       `--project=${project}`,
+      "--pass-with-no-tests",
       ...(noOp ? ["--grep", "a^"] : selectors),
     ];
 
