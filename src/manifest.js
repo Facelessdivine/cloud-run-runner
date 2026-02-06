@@ -3,7 +3,11 @@ import fs from "node:fs";
 
 export async function discoverTests() {
   console.log("🔍 Discovering tests");
-  execSync("npx playwright test --list --reporter=json > manifest.json", {
+  const testFile = process.env.TEST_FILE;
+  const cmd = testFile
+    ? `npx playwright test "${testFile}" --list --reporter=json > manifest.json`
+    : `npx playwright test --list --reporter=json > manifest.json`;
+  execSync(cmd, {
     stdio: "inherit",
   });
 

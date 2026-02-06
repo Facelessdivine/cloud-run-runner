@@ -264,6 +264,7 @@ module.exports = {
       [
         "playwright",
         "test",
+        ...(process.env.TEST_FILE ? [process.env.TEST_FILE] : []),
         `--config=${cfgPath}`,
         `--project=${project}`,
         "--list",
@@ -334,6 +335,7 @@ module.exports = {
     const args = [
       "playwright",
       "test",
+      ...(process.env.TEST_FILE ? [process.env.TEST_FILE] : []),
       `--config=${cfgPath}`,
       `--project=${project}`,
       ...(noOp ? ["--grep", "a^"] : selectors),
