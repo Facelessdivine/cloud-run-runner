@@ -136,7 +136,7 @@ async function main() {
 
   const executionId = getExecutionId();
   const RUN_ID = executionId
-    ? `${baseId}-${executionId}`
+    ? `${executionId}`
     : await getOrCreateRunIdViaGcs(REPORT_BUCKET, baseId, shardCount);
 
   process.env.RUN_ID = RUN_ID;
