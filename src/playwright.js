@@ -130,6 +130,10 @@ export async function runTests(
   const junitFile = path.join(reportDir, `results-shard-${shardId}.xml`);
   const testDir = path.join(repoDir, "tests");
 
+  const testRootRaw = (process.env.TEST_FILE || process.env.TEST_PATH || "").trim();
+  const testRoot = testRootRaw ? normalizeSlashes(testRootRaw) : "";
+  const useNativeSharding = String(process.env.PW_NATIVE_SHARDING || "").trim() === "1";
+
   // ✅ Prefer the repo's own Playwright config, but override ONLY what the runner needs:
   // - ensure shard-stable JUnit output per shard (so shards don't overwrite each other)
   // - ensure blob reporter output (required for merge-reports)
@@ -252,6 +256,81 @@ module.exports = {
     process.env.PW_BROWSERS || process.env.BROWSERS,
   );
 
+
+// Optional: let Playwright do native sharding (no custom per-test selectors).
+// Enable by setting PW_NATIVE_SHARDING=1.
+// This supports TEST_FILE/TEST_PATH as a folder or a single spec file and ensures no overlaps via --shard.
+if (useNativeSharding) {
+  const allResults = [];
+  for (const project of browsers) {
+    elog(`▶️ Shard ${shardId}: native sharding | project=${project} | shard=${shardIndex1Based}/${shardCount}${testRoot ? ` | TEST_FILE=${testRoot}` : ""}`);
+    const args = [
+      "playwright",
+      "test",
+      `--config=${cfgPath}`,
+      `--project=${project}`,
+      `--shard=${shardIndex1Based}/${shardCount}`,
+      ...(testRoot ? [testRoot] : []),
+    ];
+    const result = spawnSync("npx", args, {
+      cwd: repoDir,
+      env: {
+        ...process.env,
+        CI: "1",
+        PW_TEST_NO_COLOR: "1",
+        PW_REPORT_DIR: reportDir,
+        PW_SHARD_ID: String(shardId),
+      },
+      stdio: "inherit",
+    });
+    allResults.push(result);
+  }
+
+  const signaled = allResults.find((r) => r?.signal);
+  if (signaled?.signal) {
+    throw new Error(`Playwright terminated by signal: ${signaled.signal}`);
+  }
+
+  const exitCode = allResults.some((r) =>
+    (typeof r.status === "number" ? r.status : 1) !== 0
+  )
+    ? 1
+    : 0;
+
+  const errored = allResults.find((r) => r?.error);
+  if (errored?.error) {
+    elog("❌ Failed to start Playwright process:", errored.error);
+    throw errored.error;
+  }
+
+  if (exitCode !== 0) {
+    elog(
+      `⚠️ Playwright shard exitCode=${exitCode} (likely test failures). Continuing to upload blob...`,
+    );
+  } else {
+    elog(`✅ Playwright shard exitCode=0`);
+  }
+
+  const detailed = listDirDetailed(blobDir);
+
+  if (detailed.length === 0) {
+    const reportDirEntries = listDirDetailed(reportDir);
+    elog(
+      `🧩 reportDir entries (${reportDirEntries.length}):`,
+      reportDirEntries,
+    );
+    throw new Error(`Blob report directory is empty: ${blobDir}`);
+  }
+
+  const zipEntry = detailed.find((e) => e.isFile && e.name.endsWith(".zip"));
+  const blob = zipEntry ? path.join(blobDir, zipEntry.name) : blobDir;
+
+  if (zipEntry) elog(`✅ Blob zip: ${blob}`);
+  else elog(`✅ Blob dir: ${blob}`);
+
+  return { blob, junit: junitFile, exitCode };
+}
+
   // ✅ Even distribution by *test count* (not by file/grouping)
   // We ask Playwright to list tests for each project, then we round-robin assign them.
   const shardIndex0 = Math.max(0, Number(shardIndex1Based) - 1);
@@ -264,10 +343,10 @@ module.exports = {
       [
         "playwright",
         "test",
-        ...(process.env.TEST_FILE ? [process.env.TEST_FILE] : []),
         `--config=${cfgPath}`,
         `--project=${project}`,
         "--list",
+        ...(testRoot ? [testRoot] : []),
       ],
       {
         cwd: repoDir,
@@ -332,10 +411,11 @@ module.exports = {
       `▶️ Shard ${shardId}: project=${project} | assigned=${selectors.length}${noOp ? " (no-op)" : ""}`,
     );
 
+    // NOTE: We intentionally do NOT pass TEST_FILE/TEST_PATH here when running per-test selectors.
+    // Passing both a file/folder and selectors makes Playwright run the UNION (causes overlaps).
     const args = [
       "playwright",
       "test",
-      ...(process.env.TEST_FILE ? [process.env.TEST_FILE] : []),
       `--config=${cfgPath}`,
       `--project=${project}`,
       ...(noOp ? ["--grep", "a^"] : selectors),

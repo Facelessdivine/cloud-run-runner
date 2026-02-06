@@ -3,10 +3,10 @@ import fs from "node:fs";
 
 export async function discoverTests() {
   console.log("🔍 Discovering tests");
-  const testFile = process.env.TEST_FILE;
-  const cmd = testFile
-    ? `npx playwright test "${testFile}" --list --reporter=json > manifest.json`
-    : `npx playwright test --list --reporter=json > manifest.json`;
+  const testRoot = (process.env.TEST_FILE || process.env.TEST_PATH || "").trim();
+  const cmd = testRoot
+    ? `npx playwright test "${testRoot}" --list --reporter=json > manifest.json`
+    : "npx playwright test --list --reporter=json > manifest.json";
   execSync(cmd, {
     stdio: "inherit",
   });
